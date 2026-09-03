@@ -84,7 +84,12 @@ test.describe("The download page", () => {
   });
 
   test("is linked from the marketing footer", async ({ page }) => {
-    await page.goto("/");
+    // `/about`, not `/`. M18 replaced the marketing page at `/` with the price
+    // map, which is a full-viewport screen and deliberately carries no footer
+    // -- so this assertion looked for a link that is not meant to be there and
+    // failed on the app being correct. The footer, and this link, live on the
+    // marketing group: /about, /guide, /support, /download.
+    await page.goto("/about");
     await expect(page.getByRole("link", { name: "Get the Android app" })).toHaveAttribute(
       "href",
       "/download",

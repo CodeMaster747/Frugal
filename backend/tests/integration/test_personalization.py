@@ -187,3 +187,48 @@ class TestTheSignalsStayPut:
             )
         ).scalar_one()
         assert here is False
+
+
+class TestReadinessSeesTheSchema:
+    """`health()` backs `GET /health/ready`'s `personalization` flag.
+
+    It used to run `select(1)`, which only proves the *server* answers. A
+    database that is configured and reachable but unmigrated passes that check
+    and then 500s on the first request touching a table -- and CI ran in exactly
+    that state for two milestones while readiness reported it healthy. The probe
+    has to touch a table the migrations create, or it cannot tell the difference
+    it exists to report.
+    """
+
+    async def test_it_is_true_against_the_migrated_database(self, signals_session):
+        from app.modules.personalization.service import PersonalizationService
+
+        assert await PersonalizationService(signals_session).health() is True
+
+    async def test_it_queries_a_real_table_rather_than_select_1(self):
+        """The regression guard. A revert to `select(1)` passes every other
+        assertion in this file and fails only here."""
+        from app.modules.personalization.service import PersonalizationService
+
+        statements: list[str] = []
+
+        class Recorder:
+            async def execute(self, statement, *args, **kwargs):
+                statements.append(str(statement))
+                return None
+
+        await PersonalizationService(Recorder()).health()  # type: ignore[arg-type]
+
+        assert statements, "health() issued no query at all"
+        assert "signal_profiles" in statements[0].lower()
+
+    async def test_it_is_false_when_the_table_is_missing(self):
+        from sqlalchemy.exc import ProgrammingError
+
+        from app.modules.personalization.service import PersonalizationService
+
+        class Unmigrated:
+            async def execute(self, statement, *args, **kwargs):
+                raise ProgrammingError("relation does not exist", None, Exception())
+
+        assert await PersonalizationService(Unmigrated()).health() is False  # type: ignore[arg-type]

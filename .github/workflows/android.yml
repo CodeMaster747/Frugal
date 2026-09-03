@@ -45,7 +45,29 @@ jobs:
           ./setup-android.sh
           npx cap sync android
 
-      - name: Build both flavours
+      # Debug on pull requests, signed release on tags.
+      #
+      # The release signingConfig reads `FRUGAL_KEYSTORE` and expects a real
+      # `mobile/keystore/frugal.jks`, which is deliberately not in the
+      # repository -- a keystore in the repo is a keystore anyone can re-sign
+      # with. So a release build on a pull request fails at
+      # "Keystore file not found", and it fails for every contributor, not just
+      # a misconfigured one: pull requests from forks cannot read secrets at
+      # all. The header above already says APKs are published from tags; this is
+      # that intent applied to the build step.
+      #
+      # The permission assertion below is unaffected, which is the point.
+      # Flavour source sets are merged per flavour, not per build type, so
+      # `src/smsreader/AndroidManifest.xml` reaches the debug APK exactly as it
+      # reaches the release one, and the check that matters still runs on every
+      # pull request that touches `mobile/`.
+      - name: Build both flavours (debug)
+        if: github.event_name == 'pull_request'
+        working-directory: mobile/android
+        run: ./gradlew assembleStandardDebug assembleSmsreaderDebug
+
+      - name: Build both flavours (signed release)
+        if: github.event_name != 'pull_request'
         working-directory: mobile/android
         env:
           FRUGAL_KEYSTORE: ${{ github.workspace }}/mobile/keystore/frugal.jks
@@ -64,11 +86,14 @@ jobs:
       #
       # If only one Android check is ever written, it is this one.
       - name: The standard build must declare no SMS permission
+        env:
+          # Whichever build type the step above produced.
+          VARIANT: ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
         run: |
           set -euo pipefail
           AAPT=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name aapt2 | sort -V | tail -1)
-          STANDARD=$(find mobile/android/app/build/outputs/apk/standard/release -name '*.apk' | head -1)
-          SMSREADER=$(find mobile/android/app/build/outputs/apk/smsreader/release -name '*.apk' | head -1)
+          STANDARD=$(find "mobile/android/app/build/outputs/apk/standard/${VARIANT}" -name '*.apk' | head -1)
+          SMSREADER=$(find "mobile/android/app/build/outputs/apk/smsreader/${VARIANT}" -name '*.apk' | head -1)
 
           echo "Standard APK: $STANDARD"
           if "$AAPT" dump permissions "$STANDARD" | grep -qE 'android\.permission\.(READ_SMS|RECEIVE_SMS|BIND_NOTIFICATION_LISTENER_SERVICE)'; then
@@ -87,7 +112,10 @@ jobs:
           }
           echo "OK: the smsreader build declares READ_SMS."
 
+      # Tags only: a debug APK has no checksum worth publishing, and nothing
+      # downloads one.
       - name: Checksums
+        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -95,6 +123,7 @@ jobs:
           cd dist && sha256sum *.apk | tee SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: apks
           path: dist/
