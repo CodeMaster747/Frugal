@@ -121,3 +121,46 @@ export interface ReliabilityRubric {
 
 export const getReliabilityRubric = () =>
   apiFetch<ReliabilityRubric>("/api/v1/market/reliability/rubric");
+
+/** One seller's live listing. Distinct from a catalogue `Offer`: seen once, at
+ *  a moment, with a link out — not tracked and not in the price history. */
+export interface RetailOffer {
+  title: string;
+  price: string;
+  currency: string;
+  seller: string;
+  /** Empty for simulated offers, which have nowhere real to link to. */
+  link: string;
+  as_of: string;
+  provider: string;
+  seller_rating: string | null;
+  rating_count: number | null;
+  delivery_note: string | null;
+  thumbnail_url: string | null;
+  reliability: Reliability;
+}
+
+export interface OfferSearchResult {
+  query: string;
+  offers: RetailOffer[];
+  /** `serpapi`, `simulated`, or `cache` — so the UI can say where a price came
+   *  from rather than implying they are all live listings. */
+  source: string;
+  service_status: "ok" | "paused";
+  caveats: string[];
+  saving: string | null;
+  saving_percent: string | null;
+}
+
+/**
+ * Where a product is cheapest right now.
+ *
+ * Behind an explicit user action, never a background refresh: the free
+ * allowance is a couple of hundred searches a month for the whole deployment,
+ * so an automatic call would be the entire budget (ADR-008).
+ */
+export const searchOffers = (query: string, compareTo?: string) => {
+  const params = new URLSearchParams({ q: query });
+  if (compareTo) params.set("compare_to", compareTo);
+  return apiFetch<OfferSearchResult>(`/api/v1/market/offers?${params}`);
+};

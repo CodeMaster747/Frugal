@@ -140,6 +140,10 @@ def _run(receipt_id: uuid.UUID, job_id: str) -> dict[str, Any]:
 
     with sync_session() as session:
         _persist(session, receipt_id, extraction, ocr.engine_version, report.as_dict(), ocr_ms)
+        # Fingerprint the *preprocessed* image, not the original: deskewing and
+        # binarising are what make the hash robust to the angle and lighting
+        # differences between two photographs of one piece of paper (ADR-013).
+        _fingerprint(session, receipt_id, processed)
         session.commit()
 
     return {
@@ -210,6 +214,7 @@ def _persist(
                 receipt_id=receipt_id,
                 line_number=item.line_number,
                 description=item.description,
+                quantity=item.quantity,
                 total_price=item.total_price,
                 confidence=item.confidence,
             )
@@ -230,6 +235,86 @@ def _persist(
         for f in extraction.fields
     )
     receipt.status = ReceiptStatus.NEEDS_REVIEW.value if blocked else ReceiptStatus.READY.value
+
+
+def _fingerprint(session: Any, receipt_id: uuid.UUID, image_bytes: bytes) -> None:
+    """Record whether anyone, anywhere, has contributed this receipt before.
+
+    Computed here because this is the one place that already holds the image
+    bytes -- and they are discarded afterwards exactly as they are today. No
+    retention changes, which is the constraint that made a bespoke DCT hash
+    preferable to a dependency that wanted the file on disk.
+
+    Failure is swallowed. A duplicate check is an anti-abuse control on an
+    optional feature; a receipt the user photographed must not fail to process
+    because a hash could not be taken.
+    """
+    from app.modules.pricegraph.models import ReceiptFingerprint
+    from app.modules.receipts.models import FieldName, Receipt, ReceiptField
+    from app.modules.receipts.pipeline import fingerprint as fp
+
+    try:
+        receipt = session.get(Receipt, receipt_id)
+        if receipt is None or receipt.date_extracted is None or receipt.total_extracted is None:
+            return
+
+        gstin_row = (
+            session.query(ReceiptField)
+            .filter_by(receipt_id=receipt_id, field_name=FieldName.GSTIN.value)
+            .one_or_none()
+        )
+        line_totals = [
+            item.total_price for item in receipt.line_items if item.total_price is not None
+        ]
+
+        digest = fp.content_hash(
+            gstin=gstin_row.parsed_value if gstin_row else None,
+            merchant_normalized=(receipt.merchant_extracted or "").strip().lower() or None,
+            observed_on=receipt.date_extracted,
+            total=receipt.total_extracted,
+            line_totals=line_totals,
+        )
+        phash = fp.perceptual_hash(image_bytes)
+
+        existing = session.query(ReceiptFingerprint).filter_by(content_hash=digest).one_or_none()
+        if existing is None:
+            # No exact match. Look for the same paper photographed differently,
+            # blocking on date and total first -- normally nought to three rows,
+            # so the Hamming comparison never runs over the whole table.
+            for candidate in (
+                session.query(ReceiptFingerprint)
+                .filter_by(observed_on=receipt.date_extracted)
+                .limit(50)
+                .all()
+            ):
+                if fp.looks_like_the_same_paper(
+                    phash_a=phash,
+                    phash_b=candidate.phash,
+                    date_a=receipt.date_extracted,
+                    date_b=candidate.observed_on,
+                    total_a=receipt.total_extracted,
+                    total_b=candidate.total,
+                ):
+                    existing = candidate
+                    break
+
+        if existing is None:
+            existing = ReceiptFingerprint(
+                content_hash=digest,
+                phash=phash,
+                observed_on=receipt.date_extracted,
+                total=receipt.total_extracted,
+                first_seen_on=receipt.date_extracted,
+                sighting_count=1,
+            )
+            session.add(existing)
+            session.flush()
+        else:
+            existing.sighting_count += 1
+
+        receipt.fingerprint_id = existing.id
+    except Exception as exc:
+        logger.warning("could not fingerprint receipt", exc_info=exc)
 
 
 def _record_failure(job_id: str, exc: Exception, retries: int) -> None:
@@ -269,12 +354,15 @@ def _progress(job_id: str, stage: str, pct: int) -> None:
 
 
 def _build_store(settings: Any) -> Any:
-    from app.adapters.storage.memory import InMemoryObjectStore
-    from app.adapters.storage.s3 import S3ObjectStore
+    """The worker's half of the composition root.
 
-    if settings.storage_backend == "memory":
-        return InMemoryObjectStore()
-    return S3ObjectStore(settings)
+    Duplicated from `app.main` rather than shared: the worker is a separate
+    entry point that must not import the FastAPI application, and the boundary
+    contracts in .importlinter enforce that.
+    """
+    from app.workers.storage import build_object_store
+
+    return build_object_store(settings)
 
 
 def _build_engine(settings: Any) -> Any:

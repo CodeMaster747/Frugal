@@ -17,6 +17,7 @@ import {
   type ImportAnalysis,
 } from "@/features/finance/api";
 import { getAccessToken } from "@/lib/api/client";
+import { keys } from "@/lib/api/query-keys";
 import { formatDate, formatMoney } from "@/lib/format";
 
 /**
@@ -37,7 +38,7 @@ export default function ImportPage() {
   const [result, setResult] = useState<BulkResponse | null>(null);
   const [error, setError] = useState<unknown>(null);
 
-  const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
+  const accounts = useQuery({ queryKey: keys.finance.accounts(), queryFn: listAccounts });
 
   const ensureAccount = async () => {
     if (accountId) return accountId;

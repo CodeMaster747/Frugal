@@ -1,0 +1,17 @@
+<!--
+  Merge into the <activity android:name=".MainActivity"> block that
+  `npx cap add android` generates in android/app/src/main/AndroidManifest.xml.
+
+  This file declares NO permissions, and that is the entire point of the
+  standard build. `ACTION_SEND` needs none: the OS is handing us text the user
+  explicitly chose to share.
+
+  An SMS <uses-permission> added here would merge into BOTH flavours and Play
+  Protect would block the standard APK from installing at all. The CI check in
+  .github/workflows/android.yml exists solely to catch that.
+-->
+<intent-filter>
+    <action android:name="android.intent.action.SEND" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <data android:mimeType="text/plain" />
+</intent-filter>

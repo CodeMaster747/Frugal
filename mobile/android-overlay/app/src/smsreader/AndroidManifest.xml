@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The `smsreader` flavour, and the ONLY place SMS permissions may appear.
+
+  A `<uses-permission>` for SMS in `src/main/AndroidManifest.xml` would merge
+  into both flavours, and Play Protect blocks any website-sideloaded APK that
+  merely *declares* one. That would silently destroy the `standard` build's
+  entire reason to exist — it would still compile, still run, and simply stop
+  being installable for the users it was built for.
+
+  `.github/workflows/android.yml` runs `aapt dump permissions` over both APKs
+  and fails the build if this leaks. Nothing else catches it.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+    <application>
+        <!--
+          SMS_RECEIVED is exempt from the Android 8+ restriction on implicit
+          broadcasts, so a manifest-declared receiver still fires when a message
+          arrives. `android:permission` restricts the sender to the system, so
+          another app cannot forge a bank alert into this receiver.
+
+          Not exported to anything else, and it does no network work — see
+          SmsBroadcastReceiver for why it only ever buffers.
+        -->
+        <receiver
+            android:name="app.frugal.sms.SmsBroadcastReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

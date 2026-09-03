@@ -69,3 +69,30 @@ Thumbs.db
 # financial data one `git add -A` away from being committed.
 backups/
 *.dump
+mobile/keystore/
+
+
+# Built APKs are COMMITTED, deliberately.
+#
+# Render serves the site from this repository, so `public/downloads/*.apk` has
+# to be in the tree or /download's links 404 in production. The cost is ~6 MB
+# per release in history, permanently, and git never forgets -- ten releases is
+# 60 MB of binaries nobody will ever diff.
+#
+# The alternative, when that starts to hurt: attach them to GitHub Releases
+# (the Android workflow already builds and checksums them) and point the
+# download page at those URLs instead. That is a change to page.tsx, not to
+# this file.
+
+# Per-machine terraform inputs (contains your current IP and public key).
+infra/aws/terraform/terraform.tfvars
+
+# Generated from `app.openapi()` by `make types` and by CI, then consumed by
+# `openapi-typescript`. The *derived* file (frontend/src/lib/api/schema.d.ts)
+# is committed and gated; this intermediate is not.
+backend/openapi.json
+
+# The basemap archive. Built by `scripts/build-basemap.sh` and deployed to the
+# API host, never committed: it is a derived artefact of an OpenStreetMap
+# extract, it is megabytes, and it is rebuilt rather than versioned.
+*.pmtiles

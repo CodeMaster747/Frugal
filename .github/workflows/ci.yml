@@ -46,6 +46,11 @@ jobs:
       ENVIRONMENT: ci
       DATABASE_URL: postgresql+asyncpg://frugal:frugal@localhost:5432/frugal_test
       TEST_DATABASE_URL: postgresql+asyncpg://frugal:frugal@localhost:5432/frugal_test
+      # The second database (ADR-011). Settings refuses to boot if this resolves
+      # to the same endpoint as DATABASE_URL, so CI proves the separation the
+      # same way production does.
+      SIGNALS_DATABASE_URL: postgresql+asyncpg://frugal:frugal@localhost:5432/frugal_signals_test
+      TEST_SIGNALS_DATABASE_URL: postgresql+asyncpg://frugal:frugal@localhost:5432/frugal_signals_test
       REDIS_URL: redis://localhost:6379/0
       JWT_SECRET: ci-secret-not-used-outside-ci-0123456789ab
       LOG_FORMAT: console
@@ -71,13 +76,27 @@ jobs:
         # brings numpy, which is why the OCR modules' imports resolve here.
         # `ocr` stays out: OCR_ENGINE defaults to `fake`, so nothing in the
         # suite imports cv2, and OpenCV is a large install to carry for nothing.
-        run: pip install -e ".[auth,classify,dev]"
+        #
+        # `azure` is in for the opposite reason to `ocr`: it is small, pure
+        # Python, and tests/unit/test_storage_adapters.py skips itself entirely
+        # without it -- so leaving it out would mean the Azure adapter's SAS
+        # generation is checked in no environment at all (ADR-010).
+        run: pip install -e ".[auth,azure,classify,dev]"
+
+      # `services.postgres` creates exactly one database. The second one is a
+      # separate database on the same server -- weaker than production's two
+      # Neon projects, and still enough: Postgres cannot express a foreign key
+      # across databases and no query can join them.
+      - name: Create the personalization database
+        run: |
+          PGPASSWORD=frugal psql -h localhost -U frugal -d frugal_test \
+            -c 'CREATE DATABASE frugal_signals_test OWNER frugal'
 
       - name: Lint
-        run: ruff check app tests
+        run: ruff check app tests scripts alembic_signals
 
       - name: Format check
-        run: ruff format --check app tests
+        run: ruff format --check app tests scripts alembic_signals
 
       - name: Types
         run: mypy app
@@ -89,13 +108,50 @@ jobs:
         run: lint-imports --config .importlinter
 
       - name: Migrations apply cleanly
-        run: alembic upgrade head
+        run: |
+          alembic upgrade head
+          alembic -c alembic_signals.ini upgrade head
 
       - name: Migrations reverse cleanly
-        run: alembic downgrade base && alembic upgrade head
+        run: |
+          alembic downgrade base && alembic upgrade head
+          alembic -c alembic_signals.ini downgrade base
+          alembic -c alembic_signals.ini upgrade head
+
+      # The models and the schema agree.
+      #
+      # They did not, for two milestones, and nothing said so. `TenantMixin`
+      # declared a bare `user_id` while migration 0016 added the ON DELETE
+      # CASCADE in raw SQL, and migration 0015 indexed nineteen foreign-key
+      # child columns the models never mentioned. `alembic revision
+      # --autogenerate` would therefore have emitted a migration DROPPING all
+      # of them -- reintroducing the M10 bug where account deletion deleted
+      # nothing, on the one code path that carries a legal obligation.
+      #
+      # Two of the four M12/M13 tables were invisible to autogenerate for the
+      # same class of reason: `alembic/env.py` was missing their imports.
+      #
+      # `alembic check` exits non-zero when autogenerate would emit anything,
+      # which makes both failures a red build instead of a discovery.
+      - name: Models and schema agree
+        run: |
+          alembic check
+          alembic -c alembic_signals.ini check
 
       - name: Tests
         run: pytest --cov=app --cov-report=term-missing --cov-fail-under=80
+
+      # The contract of record, handed to the frontend job. Dumped from
+      # `app.openapi()` rather than scraped from a running server, so the check
+      # needs neither a port nor the compose stack.
+      - name: Export the OpenAPI document
+        run: python -m scripts.dump_openapi openapi.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openapi
+          path: backend/openapi.json
+          retention-days: 1
 
   frontend:
     name: Frontend
@@ -125,11 +181,56 @@ jobs:
       - name: Format check
         run: npm run format:check
 
+      # Tailwind v4 here is CSS-first with no config file, so an unknown
+      # utility is not an error -- it emits nothing and the element renders at
+      # the browser default. Four such classes survived three milestones in
+      # three files. This is the only thing that can see them.
+      - name: Design tokens resolve
+        run: npm run check:tokens
+
       - name: Types
         run: npm run typecheck
 
       - name: Build
         run: npm run build
+
+  api-types:
+    name: API types in step
+    runs-on: ubuntu-latest
+    # `docs/06-project-structure.md` said CI failed on a diff here. It did not,
+    # and `schema.d.ts` had been a field behind since ADR-010 added the Azure
+    # upload header. This job is that claim, made true.
+    needs: [backend]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: openapi
+          path: backend
+
+      - name: Install
+        run: npm ci
+
+      - name: Regenerate
+        run: npm run generate:types
+
+      - name: The committed types match the API
+        run: |
+          if ! git diff --exit-code -- src/lib/api/schema.d.ts; then
+            echo "::error::src/lib/api/schema.d.ts is behind the API." \
+                 "Run 'make types' and commit the result."
+            exit 1
+          fi
 
   e2e:
     name: E2E smoke
@@ -249,7 +350,7 @@ jobs:
         run: |
           docker build \
             --file infra/docker/backend.Dockerfile \
-            --build-arg INSTALL_EXTRAS=auth,ocr,classify \
+            --build-arg INSTALL_EXTRAS=auth,ocr,classify,azure \
             --tag frugal-api:scan \
             backend
 

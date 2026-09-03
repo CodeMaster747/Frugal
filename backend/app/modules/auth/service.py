@@ -13,9 +13,10 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import audit
+from app.core import audit, erasure
 from app.core.audit import AuditAction
 from app.core.config import get_settings
+from app.core.erasure import ErasureKind
 from app.core.errors import (
     ConflictError,
     NotFoundError,
@@ -23,6 +24,7 @@ from app.core.errors import (
     UnauthenticatedError,
 )
 from app.core.logging import get_logger
+from app.core.queue import RUN_ERASURE, dispatch
 from app.core.rate_limit import (
     login_per_account,
     login_per_ip,
@@ -301,6 +303,17 @@ class AuthService:
         The audit entry is written *before* the delete and survives it, holding
         only an opaque id -- which is what makes the deletion provable without
         retaining the data it removed.
+
+        Inside the primary database this is a cascade, and cascades are exact.
+        Across the boundary to the personalization database (ADR-011) it cannot
+        be: Postgres expresses no foreign key between databases and no
+        transaction spans them. So the debt is *recorded* here, in this
+        transaction, and paid by an idempotent sweep. There is no window in
+        which the user is gone and the obligation is unwritten.
+
+        The dispatch below is for latency only. If Redis is down, or the worker
+        is not running, or the task dies -- the hourly sweep still finds the
+        row. The guarantee is the outbox, never the message.
         """
         user = await self.get_user(user_id)
 
@@ -311,7 +324,33 @@ class AuthService:
             ip_address=ctx.ip_address,
             user_agent=ctx.user_agent,
         )
+
+        settings = get_settings()
+        if settings.personalization_enabled:
+            # Only when there *is* a second database. Recording a debt no
+            # deployment can pay would accumulate pending rows and set off the
+            # staleness alarm forever, for data that never existed.
+            await erasure.request(self.session, user.id, kind=ErasureKind.SIGNALS)
+
+        # The shared price graph, always -- it lives in this database, so there
+        # is no configuration under which the obligation does not exist.
+        #
+        # This one *anonymises* rather than deletes, and the distinction is a
+        # decision rather than a shortcut. A price at a shop on a day is a fact
+        # about the shop; deleting it would silently degrade what every other
+        # user sees and make the graph a function of churn. Nulling the
+        # contributor hash -- the last value derived from this user's id, with
+        # `receipt_promotions` already gone by cascade -- leaves a row that is
+        # genuinely anonymous.
+        #
+        # A user who wants their contributions actually removed has a separate,
+        # explicit action for it: DELETE /pricegraph/contributions. Erasure
+        # anonymises; retraction removes.
+        await erasure.request(self.session, user.id, kind=ErasureKind.PRICE_CONTRIBUTIONS)
+
         await self.users.delete(user)
+
+        dispatch(RUN_ERASURE, countdown=5)
 
     # --- oauth -------------------------------------------------------------
 

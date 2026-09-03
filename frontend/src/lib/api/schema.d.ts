@@ -48,6 +48,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metered dependencies
+         * @description What is available, and what has spent its allowance.
+         *
+         *     Unauthenticated and carrying no user data: it reports the state of the
+         *     deployment's own free tiers, which is the same answer for everyone. That
+         *     also means the paused banner still renders on a signed-out page.
+         *
+         *     Never raises. An endpoint that exists to explain why something else is
+         *     unavailable is the last thing that should fail.
+         */
+        get: operations["providers_system_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/register": {
         parameters: {
             query?: never;
@@ -1402,6 +1429,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/offers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Offers
+         * @description Where a product is cheapest right now.
+         *
+         *     Behind an explicit user action, and never called from a scheduled sweep.
+         *     At a couple of hundred searches a month for the whole deployment, an
+         *     automatic call is the entire allowance.
+         *
+         *     Degrades rather than failing: when the allowance is spent this returns
+         *     simulated prices with `service_status: "paused"` and a caveat naming the
+         *     contact, because a paused price comparison must not take down the
+         *     affordability answer that was the point.
+         */
+        get: operations["search_offers_api_v1_market_offers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/simulator/templates": {
         parameters: {
             query?: never;
@@ -1589,6 +1645,725 @@ export interface paths {
         patch: operations["update_preferences_api_v1_notifications_preferences_patch"];
         trace?: never;
     };
+    "/api/v1/sms/parse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Parse Message
+         * @description Read one message and report what would happen to it. Stores nothing.
+         *
+         *     Deliberately the first endpoint this feature ships. Granting an app
+         *     permission to read bank messages is a large ask, and the honest way to make
+         *     it answerable is to let someone paste a message in and see exactly what is
+         *     extracted, what is not, and whether it would reach the ledger unattended --
+         *     all before anything is stored.
+         *
+         *     A message that is not a transaction returns `parsed: null` with a
+         *     disposition, which is an answer rather than an error: a promotional message
+         *     from a real bank header is *correctly* read as not a transaction.
+         */
+        post: operations["parse_message_api_v1_sms_parse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sms/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Review Queue
+         * @description Everything awaiting a human, with the unmapped handles behind it.
+         */
+        get: operations["review_queue_api_v1_sms_messages_get"];
+        put?: never;
+        /**
+         * Ingest Message
+         * @description Store one message, and book it when that is safe.
+         *
+         *     Returns 409 when the message is already held -- re-sending the same alert
+         *     is the normal case for a share-sheet user who taps twice, and the intake
+         *     hash catches it before any parsing happens.
+         *
+         *     Returns 422 when the message is not a transaction. Nothing is stored in
+         *     that case: a row would be a permanent copy of a personal or promotional
+         *     message kept for no purpose, which is what this feature promises not to do.
+         */
+        post: operations["ingest_message_api_v1_sms_messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sms/messages/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Batch
+         * @description Store many messages -- the device buffer drain.
+         *
+         *     Reports counts rather than per-item errors. A drain is not a user action
+         *     they are watching: it happens when the app comes to the foreground, and the
+         *     only interesting outcome is how many new transactions appeared.
+         */
+        post: operations["ingest_batch_api_v1_sms_messages_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sms/messages/{message_id}/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Duplicates
+         * @description Transactions this message might already be.
+         *
+         *     Surfaced before commit, never merged automatically. Discovering a
+         *     double-counted expense weeks later is far worse than one dismissible
+         *     prompt now.
+         */
+        get: operations["duplicates_api_v1_sms_messages__message_id__duplicates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sms/messages/{message_id}/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Commit Message
+         * @description Turn a read message into a transaction.
+         */
+        post: operations["commit_message_api_v1_sms_messages__message_id__commit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sms/messages/{message_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Message
+         * @description Mark a message as not worth booking, keeping the row as evidence.
+         */
+        post: operations["dismiss_message_api_v1_sms_messages__message_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sms/mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mappings */
+        get: operations["list_mappings_api_v1_sms_mappings_get"];
+        put?: never;
+        /**
+         * Map Account
+         * @description Bind a bank's account handle to one of the user's accounts.
+         *
+         *     Every message held for want of this mapping is attached to the account as a
+         *     side effect, but none of them are booked. The user mapped an account; they
+         *     did not ask for a month of held transactions to appear unreviewed.
+         */
+        post: operations["map_account_api_v1_sms_mappings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sms/imports/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Backup
+         * @description Queue an "SMS Backup & Restore" export for import.
+         *
+         *     202, not 200: a three-year backup is tens of thousands of messages, and
+         *     parsing that inside a request would hold a worker until it timed out. The
+         *     response carries a job id the client polls.
+         *
+         *     This is the path that makes the feature useful with no permission at all --
+         *     it works in a browser, on iOS, and in the APK build that never asks for SMS
+         *     access. It is the primary ingestion route, not a fallback.
+         */
+        post: operations["import_backup_api_v1_sms_imports_backup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stores in a viewport
+         * @description Pins for a map viewport.
+         *
+         *     Unauthenticated on purpose: the landing screen is a map, and a signed-out
+         *     visitor seeing an empty one would learn nothing about what the product is.
+         *     Everything here is an aggregate above the contributor floor.
+         *
+         *     Coordinates are strings on the wire for the same reason amounts are
+         *     (ADR-003): a float latitude compared by equality is the same class of bug as
+         *     a float rupee.
+         */
+        get: operations["map_pins_api_v1_pricegraph_map_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/items/{item_id}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Where to buy it */
+        get: operations["item_prices_api_v1_pricegraph_items__item_id__prices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/items/{item_id}/cheaper": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cheaper than what you paid
+         * @description `null` when nowhere is cheaper, which is a real and common answer.
+         */
+        get: operations["cheaper_api_v1_pricegraph_items__item_id__cheaper_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/items/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Find an item
+         * @description Trigram search over canonical items.
+         *
+         *     Provisional items are excluded: a first sighting is one person's OCR, and
+         *     offering it as a search result would let a single mis-read become the entry
+         *     everyone else then matches against.
+         */
+        get: operations["search_items_api_v1_pricegraph_items_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/stores/{store_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One store */
+        get: operations["store_detail_api_v1_pricegraph_stores__store_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/stores/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a store
+         * @description Place a shop the import has never heard of.
+         *
+         *     For small local stores that is most of them. Geocoding a printed Indian
+         *     address resolves poorly, and the person standing in the shop knows exactly
+         *     where it is -- which is why this is a pin and not a lookup.
+         */
+        post: operations["pin_store_api_v1_pricegraph_stores_pin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/me/contributions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What I contributed
+         * @description The tenant-scoped view of a user's own contributions.
+         *
+         *     The shared observations carry none of this. `receipt_promotions` is the only
+         *     place the link exists, and it cascades from `users`.
+         */
+        get: operations["my_contributions_api_v1_pricegraph_me_contributions_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Retract everything I contributed
+         * @description Remove this user's contributions from the shared graph.
+         *
+         *     **Retraction is not erasure**, and the difference is worth stating to the
+         *     person using it. Deleting an account *anonymises* these rows -- the price
+         *     survives as a fact about the shop, because deleting it would silently
+         *     degrade what every other user sees and make the graph a function of churn.
+         *     This removes them.
+         */
+        delete: operations["retract_api_v1_pricegraph_me_contributions_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/points/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Points balance */
+        get: operations["balance_api_v1_points_balance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/points/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Points history
+         * @description Every award and every reversal.
+         *
+         *     Append-only, so this is the whole history rather than a summary of it --
+         *     including reversals, which a user is entitled to see rather than merely
+         *     noticing their balance dropped.
+         */
+        get: operations["ledger_api_v1_points_ledger_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rewards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rewards catalogue */
+        get: operations["rewards_api_v1_rewards_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rewards/{reward_id}/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem points
+         * @description Not implemented, and it says so.
+         *
+         *     501 rather than 404 or a silent success: the endpoint exists, the shape is
+         *     settled, and the thing that is missing is fulfilment. A user who tries this
+         *     should learn that, not that they typed the wrong URL.
+         */
+        post: operations["redeem_api_v1_rewards__reward_id__redeem_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reports for a store */
+        get: operations["list_reports_api_v1_community_reports_get"];
+        put?: never;
+        /**
+         * Add a report
+         * @description Say what a shop has, or what it charges.
+         *
+         *     This is the path for local stores that print nothing scannable -- which is
+         *     most of them, and the reason the receipt path alone would leave the map
+         *     empty outside chain retail.
+         */
+        post: operations["create_report_api_v1_community_reports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/reports/{report_id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm or dispute a report
+         * @description One verification per person, enforced by a unique constraint.
+         *
+         *     Agreement is weighted by the verifier's trust, so three new accounts do not
+         *     outweigh one established contributor -- which is the shape sockpuppeting
+         *     takes.
+         */
+        post: operations["verify_api_v1_community_reports__report_id__verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Retract a report */
+        delete: operations["retract_report_api_v1_community_reports__report_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/reports/{report_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Comments */
+        get: operations["comments_api_v1_community_reports__report_id__comments_get"];
+        put?: never;
+        /** Add a comment */
+        post: operations["add_comment_api_v1_community_reports__report_id__comments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/comments/{comment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Retract a comment */
+        delete: operations["retract_comment_api_v1_community_comments__comment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/{target_type}/{target_id}/vote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upvote, or take it back
+         * @description A toggle, because that is what the button does.
+         *
+         *     The *author* is paid for a received upvote, never the voter: paying the
+         *     voter would make clicking the cheapest way to farm, and there is no
+         *     verification step on a click to gate it behind.
+         */
+        post: operations["vote_api_v1_community__target_type___target_id__vote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/me/trust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My standing
+         * @description The score, and the reasons for it.
+         *
+         *     Published for the same reason `GET /health-score/rubric` is: a user whose
+         *     contribution was not promoted can read exactly what would change that,
+         *     rather than being told they are not trusted enough.
+         */
+        get: operations["my_trust_api_v1_community_me_trust_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/me/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reports I have made */
+        get: operations["my_reports_api_v1_community_me_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/me/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Comments I have made */
+        get: operations["my_comments_api_v1_community_me_comments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/community/trust/rubric": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How trust is calculated */
+        get: operations["rubric_api_v1_community_trust_rubric_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/personalization/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Spending profile
+         * @description The aggregate view derived from this user's own spending.
+         *
+         *     Never returns an individual signal. Raw purchase signals do not leave the
+         *     module, which is the whole reason they are in a database of their own.
+         */
+        get: operations["profile_api_v1_personalization_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/personalization/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-derive the profile
+         * @description Recompute now rather than waiting for the nightly sweep.
+         *
+         *     Bounded by the user's own history, so this is a read of at most
+         *     `LOOKBACK_DAYS` of their transactions and a handful of writes -- small
+         *     enough to run in the request, unlike the OCR and forecast paths.
+         */
+        post: operations["refresh_api_v1_personalization_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/personalization/archetypes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The archetype rubric
+         * @description The rules themselves, published in-product.
+         *
+         *     Same commitment as `GET /health-score/rubric` and
+         *     `GET /market/reliability/rubric`: a user who is told they match a pattern
+         *     can read what the pattern means and what threshold it took to match it.
+         */
+        get: operations["archetypes_api_v1_personalization_archetypes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1617,6 +2392,40 @@ export interface components {
             is_liquid: boolean;
             /** Institution */
             institution?: string | null;
+        };
+        /** AccountMappingIn */
+        AccountMappingIn: {
+            kind: components["schemas"]["IdentifierKind"];
+            /** Value */
+            value: string;
+            /**
+             * Account Id
+             * Format: uuid
+             */
+            account_id: string;
+        };
+        /** AccountMappingOut */
+        AccountMappingOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Account Id
+             * Format: uuid
+             */
+            account_id: string;
+            /** Kind */
+            kind: string;
+            /** Value */
+            value: string;
+            /** Is Primary */
+            is_primary: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Source */
+            source: string;
         };
         /** AccountOut */
         AccountOut: {
@@ -1712,6 +2521,29 @@ export interface components {
             /** Verdict If Chosen */
             verdict_if_chosen: string;
         };
+        /** ArchetypeMatchOut */
+        ArchetypeMatchOut: {
+            /** Slug */
+            slug: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Score */
+            score: string;
+        };
+        /** BalanceOut */
+        BalanceOut: {
+            /** Balance */
+            balance: number;
+            /**
+             * Redeemable
+             * @default false
+             */
+            redeemable: boolean;
+            /** Message */
+            message: string;
+        };
         /** Body_analyze_csv_api_v1_imports_csv_analyze_post */
         Body_analyze_csv_api_v1_imports_csv_analyze_post: {
             /** File */
@@ -1719,6 +2551,11 @@ export interface components {
         };
         /** Body_commit_csv_api_v1_imports_csv_commit_post */
         Body_commit_csv_api_v1_imports_csv_commit_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_import_backup_api_v1_sms_imports_backup_post */
+        Body_import_backup_api_v1_sms_imports_backup_post: {
             /** File */
             file: string;
         };
@@ -1904,6 +2741,29 @@ export interface components {
          * @enum {string}
          */
         ChangeKind: "one_off" | "recurring_expense" | "recurring_income";
+        /** CheaperElsewhereOut */
+        CheaperElsewhereOut: {
+            /** Item Name */
+            item_name: string;
+            /** Your Price */
+            your_price: string;
+            /** Best Price */
+            best_price: string;
+            /** Saving */
+            saving: string;
+            /** Saving Percent */
+            saving_percent: string;
+            store: components["schemas"]["StoreOut"];
+            /** Contributors */
+            contributors: number;
+            /**
+             * Last Seen On
+             * Format: date
+             */
+            last_seen_on: string;
+            /** Caveats */
+            caveats?: string[];
+        };
         /** ColumnMapping */
         ColumnMapping: {
             /** Date */
@@ -1918,6 +2778,38 @@ export interface components {
             merchant?: string | null;
             /** Description */
             description?: string | null;
+        };
+        /** CommentCreate */
+        CommentCreate: {
+            /** Body */
+            body: string;
+        };
+        /** CommentOut */
+        CommentOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Body */
+            body: string;
+            /** Upvote Count */
+            upvote_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Mine
+             * @default false
+             */
+            mine: boolean;
+            /**
+             * Voted
+             * @default false
+             */
+            voted: boolean;
         };
         /** CommitRequest */
         CommitRequest: {
@@ -1954,6 +2846,40 @@ export interface components {
             caps_at: string;
             /** Message */
             message: string;
+        };
+        /**
+         * ContributionOut
+         * @description One thing a user contributed, and what it earned.
+         *
+         *     This is the tenant-scoped view. The shared observation it produced carries
+         *     none of it.
+         */
+        ContributionOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Receipt Id
+             * Format: uuid
+             */
+            receipt_id: string;
+            /** Item Name */
+            item_name: string;
+            /** Store Name */
+            store_name: string;
+            /** Unit Price */
+            unit_price: string;
+            /**
+             * Observed On
+             * Format: date
+             */
+            observed_on: string;
+            /** Points Awarded */
+            points_awarded: number;
+            /** Retracted */
+            retracted: boolean;
         };
         /** CorrectionsRequest */
         CorrectionsRequest: {
@@ -2018,6 +2944,8 @@ export interface components {
             database: boolean;
             /** Redis */
             redis: boolean;
+            /** Personalization */
+            personalization?: boolean | null;
         };
         /**
          * DigestFrequency
@@ -2030,6 +2958,25 @@ export interface components {
          * @enum {string}
          */
         Direction: "positive" | "negative" | "neutral";
+        /** DuplicateCandidateOut */
+        DuplicateCandidateOut: {
+            /**
+             * Transaction Id
+             * Format: uuid
+             */
+            transaction_id: string;
+            /**
+             * Occurred On
+             * Format: date
+             */
+            occurred_on: string;
+            /** Amount */
+            amount: string;
+            /** Merchant */
+            merchant: string | null;
+            /** Similarity */
+            similarity: string;
+        };
         /** DuplicateOut */
         DuplicateOut: {
             /** Transaction Id */
@@ -2353,6 +3300,12 @@ export interface components {
             /** Sellers */
             sellers: number;
         };
+        /**
+         * IdentifierKind
+         * @description What kind of handle a bank used to name the account in a message.
+         * @enum {string}
+         */
+        IdentifierKind: "account_tail" | "card_tail" | "vpa" | "wallet_handle";
         /** ImportAnalysis */
         ImportAnalysis: {
             /**
@@ -2441,6 +3394,42 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * ItemPriceOut
+         * @description A store-level price, aggregated over contributors.
+         *
+         *     `contributors` is published rather than hidden: it is the difference
+         *     between "one person said so" and "eleven people agree", and a user
+         *     deciding where to shop should see which they are looking at.
+         */
+        ItemPriceOut: {
+            /**
+             * Canonical Item Id
+             * Format: uuid
+             */
+            canonical_item_id: string;
+            /** Item Name */
+            item_name: string;
+            store: components["schemas"]["StoreOut"];
+            /** Median Price */
+            median_price: string;
+            /** Min Price */
+            min_price: string;
+            /** Max Price */
+            max_price: string;
+            /** Contributors */
+            contributors: number;
+            /**
+             * Last Seen On
+             * Format: date
+             */
+            last_seen_on: string;
+            /**
+             * Currency
+             * @default INR
+             */
+            currency: string;
+        };
         /** JobResponse */
         JobResponse: {
             /**
@@ -2499,6 +3488,19 @@ export interface components {
             /** Password */
             password: string;
         };
+        /**
+         * MapPinOut
+         * @description One pin on the landing map.
+         */
+        MapPinOut: {
+            store: components["schemas"]["StoreOut"];
+            /** Price Count */
+            price_count: number;
+            /** Report Count */
+            report_count: number;
+            /** Headline */
+            headline?: string | null;
+        };
         /** MoneyOut */
         MoneyOut: {
             /** Amount */
@@ -2538,6 +3540,31 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * OfferSearchOut
+         * @description Offers for a query, ordered cheapest first.
+         *
+         *     Ordering by price asserts nothing -- it is arithmetic over a column, so
+         *     there is no score to decompose and ADR-002's validator has nothing to fire
+         *     on. What *is* a judgement, each offer's reliability, carries the published
+         *     rubric's full factor list exactly as the wishlist does.
+         */
+        OfferSearchOut: {
+            /** Query */
+            query: string;
+            /** Offers */
+            offers: components["schemas"]["RetailOfferOut"][];
+            /** Source */
+            source: string;
+            /** Service Status */
+            service_status: string;
+            /** Caveats */
+            caveats: string[];
+            /** Saving */
+            saving?: string | null;
+            /** Saving Percent */
+            saving_percent?: string | null;
+        };
         /** PageMeta */
         PageMeta: {
             /** Next Cursor */
@@ -2558,6 +3585,40 @@ export interface components {
             /** Data */
             data: components["schemas"]["TransactionOut"][];
             pagination: components["schemas"]["PageMeta"];
+        };
+        /**
+         * ParsedSmsOut
+         * @description What one message was read as, and how sure that reading is.
+         */
+        ParsedSmsOut: {
+            /** Template Id */
+            template_id: string;
+            /** Issuer */
+            issuer: string;
+            /** Rail */
+            rail: string;
+            /** Direction */
+            direction: string;
+            /** Amount */
+            amount: string;
+            /** Confidence */
+            confidence: string;
+            /** Occurred On */
+            occurred_on: string | null;
+            /** Date Inferred */
+            date_inferred: boolean;
+            /** Merchant */
+            merchant: string | null;
+            /** Vpa */
+            vpa: string | null;
+            /** Account Tail */
+            account_tail: string | null;
+            /** Reference */
+            reference: string | null;
+            /** Reversal */
+            reversal: boolean;
+            /** Caveats */
+            caveats: string[];
         };
         /** PatternOut */
         PatternOut: {
@@ -2603,6 +3664,27 @@ export interface components {
             reserves: string;
             /** Monthly Surplus */
             monthly_surplus: string;
+        };
+        /** PointsEntryOut */
+        PointsEntryOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Reason */
+            reason: string;
+            /** Points */
+            points: number;
+            /** Subject Type */
+            subject_type: string | null;
+            /** Note */
+            note: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** PreferencesIn */
         PreferencesIn: {
@@ -2702,6 +3784,86 @@ export interface components {
             history: components["schemas"]["HistoryPointOut"][];
             /** Offers */
             offers: components["schemas"]["app__modules__market__router__OfferOut"][];
+        };
+        /**
+         * ProfileOut
+         * @description The aggregate view, and how far to trust it.
+         *
+         *     `observation_days` and `confidence` are not decoration. A profile built
+         *     from three weeks and one built from two years render identically, and the
+         *     only thing stopping a user trusting them equally is this response saying
+         *     which one they are looking at -- the same argument `ForecastResult` makes.
+         */
+        ProfileOut: {
+            /**
+             * Available
+             * @description False when there is not yet enough history to say anything.
+             */
+            available: boolean;
+            /** Computed At */
+            computed_at?: string | null;
+            /**
+             * Observation Days
+             * @default 0
+             */
+            observation_days: number;
+            /**
+             * Signal Count
+             * @default 0
+             */
+            signal_count: number;
+            /** Big Purchase Threshold */
+            big_purchase_threshold?: string | null;
+            /** Median Big Purchase */
+            median_big_purchase?: string | null;
+            /** Cadence Days */
+            cadence_days?: string | null;
+            /** Category Affinities */
+            category_affinities?: {
+                [key: string]: string;
+            };
+            /** Archetypes */
+            archetypes?: components["schemas"]["ArchetypeMatchOut"][];
+            /**
+             * Confidence
+             * @default 0.000
+             */
+            confidence: string;
+            /** Factors */
+            factors?: {
+                [key: string]: string;
+            }[];
+            /** Caveats */
+            caveats?: string[];
+        };
+        /**
+         * ProviderStatusOut
+         * @description One metered dependency's remaining allowance.
+         */
+        ProviderStatusOut: {
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Used */
+            used: number;
+            /** Cap */
+            cap: number;
+            /** Remaining */
+            remaining: number;
+            /** Period Key */
+            period_key: string;
+            /** Message */
+            message: string;
+        };
+        /** ProvidersResponse */
+        ProvidersResponse: {
+            /** Providers */
+            providers: components["schemas"]["ProviderStatusOut"][];
+            /** Oldest Pending Erasure Seconds */
+            oldest_pending_erasure_seconds?: number | null;
+            /** Min Native Version */
+            min_native_version: number;
         };
         /** ReadinessResponse */
         ReadinessResponse: {
@@ -2839,6 +4001,18 @@ export interface components {
             /** Created */
             created: number;
         };
+        /**
+         * RefreshResult
+         * @description What a derivation run did. Counts, not rows.
+         */
+        RefreshResult: {
+            /** Signals Written */
+            signals_written: number;
+            /** Signals Skipped */
+            signals_skipped: number;
+            /** Profile Recomputed */
+            profile_recomputed: boolean;
+        };
         /** RegisterRequest */
         RegisterRequest: {
             /**
@@ -2876,6 +4050,115 @@ export interface components {
             /** Caveats */
             caveats: string[];
         };
+        /** ReportCreate */
+        ReportCreate: {
+            /**
+             * Store Id
+             * Format: uuid
+             */
+            store_id: string;
+            kind: components["schemas"]["ReportKind"];
+            /** Item Text */
+            item_text: string;
+            /** Price */
+            price?: string | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * ReportKind
+         * @enum {string}
+         */
+        ReportKind: "unique_item" | "good_price";
+        /** ReportOut */
+        ReportOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Store Id
+             * Format: uuid
+             */
+            store_id: string;
+            /** Store Name */
+            store_name?: string | null;
+            /** Kind */
+            kind: string;
+            /** Item Text */
+            item_text: string;
+            /** Price */
+            price?: string | null;
+            /**
+             * Currency
+             * @default INR
+             */
+            currency: string;
+            /** Note */
+            note?: string | null;
+            /** Status */
+            status: string;
+            /** Agree Count */
+            agree_count: number;
+            /** Dispute Count */
+            dispute_count: number;
+            /** Upvote Count */
+            upvote_count: number;
+            /**
+             * Promoted
+             * @default false
+             */
+            promoted: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Mine
+             * @default false
+             */
+            mine: boolean;
+            /**
+             * Voted
+             * @default false
+             */
+            voted: boolean;
+            /** Verified By Me */
+            verified_by_me?: boolean | null;
+            /** Comments */
+            comments?: components["schemas"]["CommentOut"][];
+        };
+        /** RetailOfferOut */
+        RetailOfferOut: {
+            /** Title */
+            title: string;
+            /** Price */
+            price: string;
+            /** Currency */
+            currency: string;
+            /** Seller */
+            seller: string;
+            /** Link */
+            link: string;
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Provider */
+            provider: string;
+            /** Seller Rating */
+            seller_rating?: string | null;
+            /** Rating Count */
+            rating_count?: number | null;
+            /** Delivery Note */
+            delivery_note?: string | null;
+            /** Thumbnail Url */
+            thumbnail_url?: string | null;
+            reliability: components["schemas"]["ReliabilityOut"];
+        };
         /** RetrainResponse */
         RetrainResponse: {
             /** Version */
@@ -2886,6 +4169,24 @@ export interface components {
             categories: number;
             /** Feature Version */
             feature_version: string;
+        };
+        /** RewardOut */
+        RewardOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Cost Points */
+            cost_points: number;
+            /** Is Available */
+            is_available: boolean;
         };
         /**
          * ScenarioEvent
@@ -2971,6 +4272,210 @@ export interface components {
              * @default true
              */
             health_score_after_is_estimated: boolean;
+        };
+        /**
+         * SmsBatchIn
+         * @description Many messages at once -- the device drain and the share sheet.
+         *
+         *     Capped because this is an authenticated write endpoint that does real work
+         *     per item. A backup file goes through the XML importer, which is a job.
+         */
+        SmsBatchIn: {
+            /** Messages */
+            messages: components["schemas"]["SmsIngestIn"][];
+        };
+        /** SmsBatchOut */
+        SmsBatchOut: {
+            /** Created */
+            created: number;
+            /** Already Held */
+            already_held: number;
+            /** Filtered */
+            filtered: number;
+            /** Committed */
+            committed: number;
+        };
+        /** SmsCommitIn */
+        SmsCommitIn: {
+            /** Account Id */
+            account_id?: string | null;
+            /** Category Id */
+            category_id?: string | null;
+            /**
+             * Allow Duplicate
+             * @default false
+             */
+            allow_duplicate: boolean;
+        };
+        /**
+         * SmsImportJobOut
+         * @description A queued backup import, for the client to poll.
+         *
+         *     `progress` and `result` share a shape, so the UI renders one component
+         *     throughout rather than switching on whether the job has finished.
+         */
+        SmsImportJobOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Progress */
+            progress?: {
+                [key: string]: number;
+            } | null;
+            /** Result */
+            result?: {
+                [key: string]: number;
+            } | null;
+            /** Error Message */
+            error_message?: string | null;
+        };
+        /**
+         * SmsIngestIn
+         * @description One message to read *and* store.
+         */
+        SmsIngestIn: {
+            /** Body */
+            body: string;
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /** Received At */
+            received_at?: string | null;
+            /** @default paste */
+            intake: components["schemas"]["SmsIntake"];
+        };
+        /**
+         * SmsIntake
+         * @description How the message reached us. Recorded because the paths fail differently.
+         * @enum {string}
+         */
+        SmsIntake: "paste" | "share" | "xml_import" | "device_live";
+        /**
+         * SmsMessageOut
+         * @description A row in the review queue, with its working shown.
+         */
+        SmsMessageOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Intake */
+            intake: string;
+            /** Sender */
+            sender: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Body Redacted */
+            body_redacted: string;
+            /** Status */
+            status: string;
+            /** Template Id */
+            template_id: string | null;
+            /** Confidence */
+            confidence: string | null;
+            /** Parsed */
+            parsed: {
+                [key: string]: unknown;
+            } | null;
+            /** Resolved Account Id */
+            resolved_account_id: string | null;
+            /** Transaction Id */
+            transaction_id: string | null;
+        };
+        /**
+         * SmsParseIn
+         * @description One message to read. Nothing is stored by this request.
+         */
+        SmsParseIn: {
+            /** Body */
+            body: string;
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /** Received At */
+            received_at?: string | null;
+            /** @default paste */
+            intake: components["schemas"]["SmsIntake"];
+        };
+        /**
+         * SmsParseOut
+         * @description The result of reading one message without storing it.
+         *
+         *     `parsed` is null when nothing matched, which is an answer rather than an
+         *     error: a promotional message from a bank header is correctly read as not a
+         *     transaction, and the caller should say so rather than show a failure.
+         */
+        SmsParseOut: {
+            parsed: components["schemas"]["ParsedSmsOut"] | null;
+            /** Disposition */
+            disposition: string;
+            /** Reason */
+            reason: string;
+            /** Resolved Account Id */
+            resolved_account_id?: string | null;
+            /** Unmapped Tail */
+            unmapped_tail?: string | null;
+        };
+        /** SmsQueueOut */
+        SmsQueueOut: {
+            /** Messages */
+            messages: components["schemas"]["SmsMessageOut"][];
+            /** Unmapped Tails */
+            unmapped_tails: {
+                [key: string]: number;
+            };
+        };
+        /** StoreOut */
+        StoreOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Address Line */
+            address_line?: string | null;
+            /** Pincode */
+            pincode?: string | null;
+            /** City */
+            city?: string | null;
+            /** Latitude */
+            latitude?: string | null;
+            /** Longitude */
+            longitude?: string | null;
+            /** Source */
+            source: string;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+        };
+        /** StorePinIn */
+        StorePinIn: {
+            /** Name */
+            name: string;
+            /** Latitude */
+            latitude: string;
+            /** Longitude */
+            longitude: string;
+            /** Pincode */
+            pincode?: string | null;
+            /** Note */
+            note?: string | null;
         };
         /** SuggestResponse */
         SuggestResponse: {
@@ -3138,6 +4643,25 @@ export interface components {
              */
             on: string;
         };
+        /**
+         * TrustOut
+         * @description A user's own standing, with the reasons.
+         *
+         *     ADR-002's shape. A score that gates whether somebody's contribution reaches
+         *     other people has no business being unexplainable.
+         */
+        TrustOut: {
+            /** Score */
+            score: string;
+            /** Can Promote */
+            can_promote: boolean;
+            /** Threshold */
+            threshold: string;
+            /** Factors */
+            factors?: {
+                [key: string]: string;
+            }[];
+        };
         /** UpdateProfileRequest */
         UpdateProfileRequest: {
             /** Display Name */
@@ -3169,6 +4693,10 @@ export interface components {
             expires_in: number;
             /** Accepted Types */
             accepted_types: string[];
+            /** Upload Headers */
+            upload_headers?: {
+                [key: string]: string;
+            };
         };
         /** UserResponse */
         UserResponse: {
@@ -3212,6 +4740,11 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VerificationIn */
+        VerificationIn: {
+            /** Agrees */
+            agrees: boolean;
         };
         /** WishlistItemOut */
         WishlistItemOut: {
@@ -3457,6 +4990,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadinessResponse"];
+                };
+            };
+        };
+    };
+    providers_system_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvidersResponse"];
                 };
             };
         };
@@ -5868,6 +7421,39 @@ export interface operations {
             };
         };
     };
+    search_offers_api_v1_market_offers_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+                compare_to?: number | string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfferSearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_templates_api_v1_simulator_templates_get: {
         parameters: {
             query?: never;
@@ -6128,6 +7714,1068 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    parse_message_api_v1_sms_parse_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmsParseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmsParseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_queue_api_v1_sms_messages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmsQueueOut"];
+                };
+            };
+        };
+    };
+    ingest_message_api_v1_sms_messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmsIngestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmsMessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_batch_api_v1_sms_messages_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmsBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmsBatchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    duplicates_api_v1_sms_messages__message_id__duplicates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicateCandidateOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_message_api_v1_sms_messages__message_id__commit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmsCommitIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_message_api_v1_sms_messages__message_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmsMessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mappings_api_v1_sms_mappings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMappingOut"][];
+                };
+            };
+        };
+    };
+    map_account_api_v1_sms_mappings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMappingIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMappingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_backup_api_v1_sms_imports_backup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_backup_api_v1_sms_imports_backup_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmsImportJobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    map_pins_api_v1_pricegraph_map_get: {
+        parameters: {
+            query: {
+                min_lat: string;
+                max_lat: string;
+                min_lon: string;
+                max_lon: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapPinOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    item_prices_api_v1_pricegraph_items__item_id__prices_get: {
+        parameters: {
+            query?: {
+                pincode?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemPriceOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cheaper_api_v1_pricegraph_items__item_id__cheaper_get: {
+        parameters: {
+            query: {
+                paid: string;
+                pincode?: string | null;
+            };
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheaperElsewhereOut"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_items_api_v1_pricegraph_items_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    store_detail_api_v1_pricegraph_stores__store_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pin_store_api_v1_pricegraph_stores_pin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorePinIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_contributions_api_v1_pricegraph_me_contributions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContributionOut"][];
+                };
+            };
+        };
+    };
+    retract_api_v1_pricegraph_me_contributions_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    balance_api_v1_points_balance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceOut"];
+                };
+            };
+        };
+    };
+    ledger_api_v1_points_ledger_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PointsEntryOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rewards_api_v1_rewards_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RewardOut"][];
+                };
+            };
+        };
+    };
+    redeem_api_v1_rewards__reward_id__redeem_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reward_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Successful Response */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_reports_api_v1_community_reports_get: {
+        parameters: {
+            query?: {
+                store_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_report_api_v1_community_reports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_api_v1_community_reports__report_id__verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerificationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retract_report_api_v1_community_reports__report_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    comments_api_v1_community_reports__report_id__comments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_comment_api_v1_community_reports__report_id__comments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retract_comment_api_v1_community_comments__comment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                comment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    vote_api_v1_community__target_type___target_id__vote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target_type: string;
+                target_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_trust_api_v1_community_me_trust_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrustOut"];
+                };
+            };
+        };
+    };
+    my_reports_api_v1_community_me_reports_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportOut"][];
+                };
+            };
+        };
+    };
+    my_comments_api_v1_community_me_comments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentOut"][];
+                };
+            };
+        };
+    };
+    rubric_api_v1_community_trust_rubric_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    profile_api_v1_personalization_profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileOut"];
+                };
+            };
+        };
+    };
+    refresh_api_v1_personalization_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshResult"];
+                };
+            };
+        };
+    };
+    archetypes_api_v1_personalization_archetypes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

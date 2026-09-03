@@ -89,7 +89,11 @@ class Insight(UUIDMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Base):
     #: link to the transaction rather than describe it and leave the user to
     #: search.
     subject_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("transactions.id", ondelete="SET NULL")
+        ForeignKey(
+            "transactions.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
 
     __table_args__ = (

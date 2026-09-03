@@ -49,10 +49,13 @@ celery_app.conf.update(
     task_default_queue="default",
     task_routes={
         "app.workers.tasks.receipts.*": {"queue": "ocr"},
-        "app.workers.tasks.categorization.*": {"queue": "ml"},
         "app.workers.tasks.forecasting.*": {"queue": "ml"},
         "app.workers.tasks.market.*": {"queue": "default"},
         "app.workers.tasks.notifications.*": {"queue": "default"},
+        "app.workers.tasks.sms.*": {"queue": "default"},
+        "app.workers.tasks.personalization.*": {"queue": "default"},
+        "app.workers.tasks.pricegraph.*": {"queue": "default"},
+        "app.workers.tasks.scraping.*": {"queue": "scrape"},
     },
     beat_schedule={
         # Daily price refresh for tracked products (M9). Early morning UTC is
@@ -69,6 +72,41 @@ celery_app.conf.update(
             "task": "app.workers.tasks.notifications.run_notifications",
             "schedule": crontab(minute="15"),
         },
+        # Nightly, and deliberately not more often. This drops the original
+        # text of messages nobody came back to review; the window is a
+        # retention promise, not a deadline, and running it hourly would write
+        # far more than it cleared.
+        "purge-sms-raw-bodies": {
+            "task": "app.workers.tasks.sms.purge_raw_bodies",
+            "schedule": crontab(hour="4", minute="10"),
+        },
+        # The erasure sweep (ADR-011). Hourly, at :45 to stay clear of the
+        # notification run at :15 -- on a single-concurrency worker two
+        # schedules landing together is one of them waiting.
+        #
+        # Account deletion dispatches this directly, so the ordinary case
+        # completes in seconds. The schedule is the guarantee: it is what makes
+        # the obligation independent of Redis being up, the worker being
+        # alive, and the task not having died.
+        "run-erasure": {
+            "task": "app.workers.tasks.personalization.run_erasure",
+            "schedule": crontab(minute="45"),
+        },
+        # Nightly re-derivation of spending profiles. Reads only the user's own
+        # ledger, so it touches no external service and no quota.
+        "refresh-personalization": {
+            "task": "app.workers.tasks.personalization.refresh_profiles",
+            "schedule": crontab(hour="4", minute="40"),
+        },
+        # Re-crawl only queries somebody searched in the last week -- the same
+        # argument `refresh_prices` makes for polling only tracked products:
+        # the value of a price observation is entirely in someone caring about
+        # it. A nightly sweep over everything ever searched would spend a
+        # host's goodwill on questions nobody is asking any more.
+        "refresh-tracked-scrapes": {
+            "task": "app.workers.tasks.scraping.refresh_scrapes",
+            "schedule": crontab(hour="3", minute="50"),
+        },
     },
 )
 
@@ -82,6 +120,26 @@ GENERATE_FORECAST = "app.workers.tasks.forecasting.generate_forecast"
 REFRESH_PRICES = "app.workers.tasks.market.refresh_prices"
 #: Hourly notification generation and delivery (M10).
 RUN_NOTIFICATIONS = "app.workers.tasks.notifications.run_notifications"
+#: An uploaded SMS Backup & Restore export (M12).
+IMPORT_SMS_BACKUP = "app.workers.tasks.sms.import_sms_backup"
+#: Nightly retention sweep over unresolved messages' original text (M12).
+PURGE_SMS_RAW_BODIES = "app.workers.tasks.sms.purge_raw_bodies"
+#: Drains the erasure outbox into the personalization database (ADR-011).
+#: Dispatched on account deletion for latency, and scheduled hourly for the
+#: guarantee.
+RUN_ERASURE = "app.workers.tasks.personalization.run_erasure"
+#: Nightly re-derivation of spending profiles (ADR-011).
+REFRESH_PROFILES = "app.workers.tasks.personalization.refresh_profiles"
+#: Considers a committed receipt for the shared price graph (ADR-013).
+PROMOTE_RECEIPT = "app.workers.tasks.pricegraph.promote_receipt"
+#: Reconsiders a user's unpromoted receipts after they pin a shop. Without it,
+#: a receipt refused for `store_unresolved` is never looked at again.
+RETRY_PROMOTIONS = "app.workers.tasks.pricegraph.retry_promotions"
+#: Fetches offers from allowlisted hosts (ADR-012). Worker only -- there is
+#: no network in the request path.
+SCRAPE_OFFERS = "app.workers.tasks.scraping.scrape_offers"
+#: Nightly re-crawl of queries somebody actually searched recently.
+REFRESH_SCRAPES = "app.workers.tasks.scraping.refresh_scrapes"
 
 
 def dispatch(task_name: str, *, countdown: int = 0, **kwargs: Any) -> str:

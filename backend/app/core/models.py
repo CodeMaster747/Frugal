@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from sqlalchemy import DateTime, MetaData, Numeric, String, func
+from sqlalchemy import DateTime, ForeignKey, MetaData, Numeric, String, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID  # noqa: N811 — SQLAlchemy's own name
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -110,6 +110,24 @@ class TenantMixin:
     The redundancy is deliberate: it lets BaseRepository scope every query with
     one predicate, making "forgot to check ownership" unrepresentable rather
     than merely discouraged. See docs/03-data-model.md section 8.1.
+
+    **The foreign key belongs here, not in a migration.** Migration 0016 added
+    ``ON DELETE CASCADE`` to nineteen tables after the M10 discovery that
+    account deletion had never deleted anything -- but it added them in raw SQL,
+    and the mixin kept declaring a bare column. Models and schema then disagreed
+    about every one of those cascades, so ``alembic revision --autogenerate``
+    would have emitted a migration *dropping* them and quietly reintroduced the
+    original bug. Declaring it here makes the cascade a property of being
+    user-owned: a new tenant table gets it by construction, and ``alembic
+    check`` in CI fails if the schema ever drifts back.
+
+    The referent is a string, so this creates no Python import from any module
+    to ``auth`` -- the boundary contracts in .importlinter are unaffected.
     """
 
-    user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )

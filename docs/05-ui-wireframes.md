@@ -21,11 +21,25 @@
 
 ### 2.1 Foundations
 
-Frugal has no existing brand, so the design system adopts the **validated reference palette** rather
-than inventing one — an unvalidated brand palette would have to clear the same colorblind-safety gates
-anyway, and inventing colors first is the most common way charts end up unreadable.
+Frugal's data and status palettes are the **validated reference palette** rather than an invented one —
+an unvalidated palette would have to clear the same colorblind-safety gates anyway, and inventing colors
+first is the most common way charts end up unreadable.
 
-**Typeface:** `system-ui, -apple-system, "Segoe UI", sans-serif` throughout, including hero figures.
+A **brand** reservation was added on top of that in the art-direction pass, and it is chrome only: mark,
+primary identity action, links, active nav, focus ring. It never encodes a value and never becomes a
+series. Its hue was forced — blue, orange, aqua, yellow, green, red and salmon are all spoken for, which
+leaves violet — but hue alone was not enough to keep it safe. Measured under Machado-Oliveira against
+all eight palette colors, a violet at the chart slots' own lightness collapses onto `--series-1`
+(worst-case ΔE 4.4 and 5.4, under the floor of 6). So the brand separates by **lightness**, living at the
+ends of its ramp where the chart palette has nothing: `#4c1e73` on light (ΔE 31.6) and `#c39dee` on dark
+(ΔE 17.2). Same reservation logic the status colors already use.
+
+**Typeface:** three faces, each with one job. **Instrument Sans** carries the interface — it ships `tnum`,
+which the `.tabular` rule depends on; a face without it makes that rule a silent no-op and money columns
+stop aligning with no error anywhere. **IBM Plex Mono** carries figures that must align. **Instrument
+Serif** carries marketing headings and the cold-start welcome, through the `type-editorial` roles — it is
+deliberately not folded into `type-hero`/`type-display`, because both of those are used on figures as
+well as headings and the serif has no `tnum`.
 `font-variant-numeric: tabular-nums` on table columns and axis ticks only — anywhere digits must align
 vertically. Standalone figures use proportional figures.
 
@@ -57,8 +71,19 @@ silently drop the size.
 | `type-body` | 14px / 1.55 | Body copy, table cells, controls |
 | `type-meta` | 12px / 1.45 | Captions, hints, timestamps |
 | `type-eyebrow` | 12px / 1.35 / +0.06em / 500 / uppercase | Stat labels, column heads, nav groups |
+| `type-editorial` | 32px / 1.15 / −0.01em / 400 / serif | Marketing headings, cold-start welcome |
+| `type-editorial-hero` | 48px / 1.05 / −0.015em / 400 / serif | Marketing hero headline |
 
-`body` carries −0.011em of tracking. Geist is spaced for smaller optical sizes than a screen UI runs at;
+The two `type-editorial` roles mirror `type-display` and `type-hero` in size, set in the display serif.
+They are separate roles rather than a family class composed on top, for two reasons. Size, weight,
+tracking and leading travel together here, and a serif at these sizes wants different numbers — less
+negative tracking, and weight 400, because Instrument Serif ships one weight. And composition would not
+work anyway: both would be one class of specificity, and Tailwind emits `type-*` after `font-*`, so the
+role's 600 would win and the browser would synthesise a faux bold — on a high-contrast serif that reads
+as a smeared outline rather than a heavier face.
+
+`body` carries −0.011em of tracking. Instrument Sans, like most grotesques, is spaced for smaller optical
+sizes than a screen UI runs at;
 without it the copy reads slightly loose. The one figure permitted outside the scale is the health score
 (48px), because it is the entire subject of its page.
 
@@ -198,7 +223,7 @@ Nine flat destinations is past what one list holds legibly, so they are grouped 
 unlabelled working set, then **Insights**, then **Market**. Settings (shown as the user's display name),
 the theme control, and sign-out are pinned to the footer.
 
-The active item takes a `surface` fill plus a 2px `--series-1` rail at its left edge — matched by prefix,
+The active item takes a `surface` fill plus a 2px `--brand` rail at its left edge — matched by prefix,
 so `/transactions/import` keeps Transactions lit — and carries `aria-current="page"`. Nav is defined as a
 single data array so the full sidebar, the collapsed rail, and the mobile tab bar cannot drift apart.
 
@@ -542,7 +567,7 @@ Rules it enforces:
   rubric factors appear without a frontend change (which is why adding a factor is a non-breaking API
   change).
 - Contribution bars are **diverging** from a zero baseline: positive right, negative left, gray at zero.
-- An empty `factors` array renders a visible error in development and logs to CloudWatch in production.
+- An empty `factors` array renders a visible error in development and logs to Log Analytics in production.
   A recommendation without reasoning is a defect, and it should be loud.
 - Caveats always render when present. They are never collapsed behind a "show more".
 

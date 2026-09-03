@@ -66,6 +66,11 @@ class TransactionSource(StrEnum):
     RECEIPT = "receipt"
     RECURRING = "recurring"
     DEMO_SEED = "demo_seed"
+    # A bank alert, parsed from the user's SMS. Stored in the same `String(20)`
+    # column as every other source -- docs/03-data-model.md calls this an ENUM,
+    # but no migration ever created one, so adding a source is a code change
+    # rather than a schema change.
+    SMS = "sms"
 
 
 class GoalStatus(StrEnum):
@@ -142,13 +147,25 @@ class Category(UUIDMixin, TimestampMixin, Base):
     space the categoriser is trained against (M5). Because of that NULL this is
     not a TenantMixin table, and repositories reach it through the explicit
     shared-data path rather than the tenant-scoped one.
+
+    It still cascades: a user's own categories go when the user does, and the
+    NULL-owned system rows are untouched because NULL matches no user. Declared
+    here rather than only in migration 0016 -- the mixin cannot carry it for a
+    nullable column, and without this line `alembic check` would propose
+    dropping the constraint.
     """
 
     __tablename__ = "categories"
 
-    user_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="CASCADE")
+        ForeignKey(
+            "categories.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
     )
 
     name: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -187,10 +204,16 @@ class Transaction(UUIDMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Base)
     __tablename__ = "transactions"
 
     account_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL")
+        ForeignKey(
+            "categories.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
 
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -211,15 +234,27 @@ class Transaction(UUIDMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Base)
     description: Mapped[str | None] = mapped_column(Text)
 
     transfer_pair_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("transactions.id", ondelete="SET NULL")
+        ForeignKey(
+            "transactions.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
     recurring_item_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("recurring_items.id", ondelete="SET NULL")
+        ForeignKey(
+            "recurring_items.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
     # Set when a transaction came from a scanned receipt (M4). Deliberately not
     # a hard dependency: deleting the image must not delete the expense.
     receipt_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("receipts.id", ondelete="SET NULL")
+        ForeignKey(
+            "receipts.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
 
     source: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -328,7 +363,11 @@ class Budget(UUIDMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "budgets"
 
     category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="CASCADE")
+        ForeignKey(
+            "categories.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
     )
     period: Mapped[str] = mapped_column(String(20), nullable=False, server_default="monthly")
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
@@ -364,7 +403,11 @@ class Goal(UUIDMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Base):
     target_date: Mapped[date | None] = mapped_column(Date)
 
     linked_account_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="SET NULL")
+        ForeignKey(
+            "accounts.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
 
     # Consumed by the advisor's opportunity-cost calculation (FR-8.10):
@@ -393,10 +436,18 @@ class RecurringItem(UUIDMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Bas
     __tablename__ = "recurring_items"
 
     account_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE")
+        ForeignKey(
+            "accounts.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
     )
     category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL")
+        ForeignKey(
+            "categories.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)

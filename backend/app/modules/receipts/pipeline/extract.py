@@ -80,6 +80,16 @@ class LineItem:
     description: str | None
     total_price: Decimal | None
     confidence: Decimal
+    #: How many were bought, when the receipt says so.
+    #:
+    #: `None` means the receipt did not state it, which is the common case and
+    #: is *not* the same as 1. The price graph treats an absent quantity as one
+    #: unit -- a documented assumption rather than a silent one, and a robust
+    #: enough guess given that a store price is a median over several
+    #: contributors, so one shopper who bought two is an outlier the median
+    #: absorbs. Without this field there is nothing to be wrong about, and a
+    #: "2 x 32.00 = 64.00" line would enter the graph as a 64-rupee carton.
+    quantity: Decimal | None = None
 
 
 @dataclass(slots=True)
@@ -106,14 +116,41 @@ class Extraction:
 
 def extract(result: OcrResult) -> Extraction:
     lines = _group_lines(result)
+    merchant = _extract_merchant(lines)
     fields = [
-        _extract_merchant(lines),
+        merchant,
         _extract_date(lines),
         _extract_total(lines),
         _extract_tax(lines),
         _extract_subtotal(lines),
+        *_extract_store_identity(lines, merchant),
     ]
     return Extraction(fields=fields, line_items=_extract_line_items(lines, fields))
+
+
+def _extract_store_identity(lines: list[tuple[int, list[Word]]], merchant: Field) -> list[Field]:
+    """Where the receipt came from (M16).
+
+    Imported inside the function to keep the module cycle-free: `store_identity`
+    reuses `Field` and the three confidence constants from here.
+    """
+    from app.modules.receipts.pipeline import store_identity
+
+    line_texts = [_text_of(words) for _, words in lines]
+    document = "\n".join(line_texts)
+
+    merchant_line: int | None = None
+    if merchant.raw_text:
+        merchant_line = next(
+            (i for i, text in enumerate(line_texts) if merchant.raw_text in text), None
+        )
+
+    return [
+        store_identity.extract_gstin(document),
+        store_identity.extract_pincode(document),
+        store_identity.extract_phone(document),
+        store_identity.extract_address(line_texts, merchant_line),
+    ]
 
 
 # --- helpers ---------------------------------------------------------------
@@ -447,7 +484,9 @@ def _extract_line_items(lines: list[tuple[int, list[Word]]], fields: list[Field]
         if amount is None or quality == 0 or amount <= 0:
             continue
 
-        description = AMOUNT.sub("", text).strip(" .-x*")
+        quantity, text_without_quantity = _parse_quantity(text)
+
+        description = AMOUNT.sub("", text_without_quantity).strip(" .-x*")
         if len(description) < 2:
             continue
 
@@ -457,7 +496,31 @@ def _extract_line_items(lines: list[tuple[int, list[Word]]], fields: list[Field]
                 description=description[:255],
                 total_price=amount,
                 confidence=(_mean_confidence(words) * quality).quantize(Decimal("0.001")),
+                quantity=quantity,
             )
         )
 
     return items[:50]
+
+
+#: "2 x", "2 X", "2 @", "2 *" -- the forms an Indian receipt actually prints.
+#:
+#: Anchored to the start of the line and capped at two digits: a bare number
+#: mid-line is far more often part of a product name ("Maggi 2 Minute") than a
+#: count, and reading one as a quantity would halve a price rather than fail to
+#: find one.
+QUANTITY = re.compile(r"^\s*(\d{1,2}(?:\.\d{1,3})?)\s*[xX@*]\s+")
+
+
+def _parse_quantity(text: str) -> tuple[Decimal | None, str]:
+    """A stated quantity, and the line with it removed."""
+    match = QUANTITY.match(text)
+    if match is None:
+        return None, text
+    try:
+        quantity = Decimal(match.group(1))
+    except Exception:
+        return None, text
+    if quantity <= 0:
+        return None, text
+    return quantity, text[match.end() :]

@@ -142,6 +142,17 @@ class FinanceService:
 
     # --- accounts ---------------------------------------------------------
 
+    async def get_account(self, user_id: uuid.UUID, account_id: uuid.UUID) -> Account:
+        """Fetch one account, or 404.
+
+        Public because other modules legitimately need to check that an account
+        exists and belongs to the caller -- the SMS module does this before
+        binding a bank's account handle to it. The alternative is reaching
+        through `service.accounts`, which is the coupling to a module's table
+        layout that `finance-repositories-are-private` exists to prevent.
+        """
+        return await self.accounts.get_or_404(user_id, account_id)
+
     async def create_account(self, user_id: uuid.UUID, data: AccountCreate) -> Account:
         if await self.accounts.by_name(user_id, data.name):
             raise ConflictError(f"An account named {data.name!r} already exists")

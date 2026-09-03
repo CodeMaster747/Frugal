@@ -42,11 +42,19 @@ _STATUS_TO_CODE = {
 }
 
 
+# `geolocation=(self)` and `camera=(self)` are grants, and narrow ones: `self`
+# is this origin only, so a third-party frame still cannot ask. Both are load
+# bearing -- the map at `/` centres on the user, and receipt capture is a photo
+# of a piece of paper. Before M14 this header denied all three outright, which
+# made those two features impossible to build without anyone noticing why.
+#
+# `microphone` stays fully denied. Nothing in the product records audio, and a
+# permission nothing needs is pure attack surface.
 _SECURITY_HEADERS = [
     (b"x-content-type-options", b"nosniff"),
     (b"x-frame-options", b"DENY"),
     (b"referrer-policy", b"strict-origin-when-cross-origin"),
-    (b"permissions-policy", b"geolocation=(), microphone=(), camera=()"),
+    (b"permissions-policy", b"geolocation=(self), camera=(self), microphone=()"),
 ]
 
 

@@ -24,6 +24,7 @@ import {
 } from "@/features/finance/api";
 import { CategoryCell } from "@/features/finance/components/category-cell";
 import { formatDate, formatMoney, todayISO } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 
 function TransactionsView() {
   const params = useSearchParams();
@@ -34,13 +35,13 @@ function TransactionsView() {
   // people ("12 need review") rather than a mode they toggle into by hand.
   const [reviewOnly, setReviewOnly] = useState(params.get("review") === "1");
 
-  const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
-  const categories = useQuery({ queryKey: ["categories"], queryFn: listCategories });
+  const accounts = useQuery({ queryKey: keys.finance.accounts(), queryFn: listAccounts });
+  const categories = useQuery({ queryKey: keys.finance.categories(), queryFn: listCategories });
 
   // Cursor pagination: the backend returns an opaque keyset cursor, so
   // inserting a transaction mid-scroll can never skip or duplicate a row.
   const ledger = useInfiniteQuery({
-    queryKey: ["transactions", { q: search, reviewOnly }],
+    queryKey: keys.finance.transactions.list({ q: search, reviewOnly }),
     queryFn: ({ pageParam }) =>
       listTransactions({
         cursor: pageParam,
@@ -57,8 +58,8 @@ function TransactionsView() {
   // which reads as the edit having failed.
   const refresh = () =>
     Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["transactions"] }),
-      queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+      queryClient.invalidateQueries({ queryKey: keys.finance.transactions.all() }),
+      queryClient.invalidateQueries({ queryKey: keys.finance.accounts() }),
     ]);
 
   const rows = ledger.data?.pages.flatMap((p) => p.data) ?? [];

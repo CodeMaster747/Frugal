@@ -24,6 +24,12 @@ dependencies = [
     "msgpack>=1.2.1",
     "python-multipart>=0.0.12",
     "aioboto3>=13.2.0",
+    # Parses the SMS backup upload. A core dependency rather than an extra:
+    # `xml.etree` is documented as vulnerable to entity expansion, the backup
+    # file is untrusted input, and an optional hardening library is one deploy
+    # away from being absent exactly where it matters. Pure Python, no build
+    # step, MIT -- so it costs the image nothing.
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +55,28 @@ ocr = [
 # Categorisation only: TF-IDF and logistic regression. Split from `forecast`
 # so the dev image can run the classifier eval without pulling Prophet's
 # ~400 MB toolchain (ADR-006 -- the API never imports either).
+# Azure Blob Storage (ADR-010). An extra rather than a core dependency: a
+# deployment on S3, R2 or MinIO must not carry the Azure SDK, and the adapter
+# is only imported when storage_backend is `azure_blob`.
+azure = [
+    "azure-storage-blob>=12.24.0",
+    # Supplies DefaultAzureCredential, which reaches the VM's managed identity
+    # over IMDS. Without it the adapter can only sign with an account key --
+    # which is exactly the durable secret this deployment is built to avoid.
+    "azure-identity>=1.19.0",
+]
+scrape = [
+    # ADR-012. Installed in the WORKER image only: there is no network in the
+    # request path, so the API has no use for an HTTP client here.
+    #
+    # No HTML parser. The permitted surface is public JSON endpoints, which
+    # need none -- which defers that dependency argument entirely. If HTML is
+    # ever added, prefer `selectolax` (lexbor, ~2 MB, no libxml2) over `lxml`:
+    # lxml vendors libxml2, and the `security` job runs Trivy at
+    # HIGH,CRITICAL with exit-code 1, so a libxml2 CVE would break CI on
+    # somebody else's schedule.
+    "httpx>=0.28.0",
+]
 classify = [
     "scikit-learn>=1.5.2",
     "numpy>=1.26.0,<2.2",
@@ -67,6 +95,7 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "import-linter>=2.1",
+    "types-defusedxml>=0.7.0",
 ]
 # types-redis is deliberately absent: it is deprecated and shadows the inline
 # type hints redis-py now ships, producing worse results than no stub at all.
@@ -135,7 +164,7 @@ python_version = "3.11"
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
-exclude = ["alembic/versions/"]
+exclude = ["alembic/versions/", "alembic_signals/versions/"]
 cache_dir = "/tmp/.mypy_cache"
 
 [[tool.mypy.overrides]]

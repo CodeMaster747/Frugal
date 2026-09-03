@@ -63,3 +63,32 @@ def client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+async def get_optional_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> CurrentUser | None:
+    """The principal, if there is one, without requiring one.
+
+    For endpoints that are readable signed out but say more when signed in --
+    the community reports list is the case that prompted it, where `mine` and
+    `voted` were hardcoded false because the handler had no way to know who was
+    asking.
+
+    A malformed or expired token is treated as absent rather than raised: this
+    is a public endpoint, and a stale token in an old tab should degrade to the
+    anonymous view rather than break a page that never needed auth.
+    """
+    if credentials is None or not credentials.credentials:
+        return None
+
+    try:
+        user_id = decode_access_token(credentials.credentials)
+    except Exception:
+        return None
+
+    bind_user_id(str(user_id))
+    return CurrentUser(id=user_id)
+
+
+OptionalUserDep = Annotated[CurrentUser | None, Depends(get_optional_user)]

@@ -46,7 +46,11 @@ class PurchaseEvaluation(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "purchase_evaluations"
 
     product_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("products.id", ondelete="SET NULL")
+        ForeignKey(
+            "products.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
     #: What the user actually asked about. Kept even when a product matched, so
     #: the history reads back in their words rather than the catalogue's.

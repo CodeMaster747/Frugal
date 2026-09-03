@@ -19,6 +19,7 @@ import {
   type Preferences,
 } from "@/features/simulator/api";
 import { formatDate } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 
 const CATEGORIES: { key: keyof Preferences; label: string; blurb: string }[] = [
   {
@@ -63,13 +64,14 @@ const FREQUENCIES: { value: Preferences["digest_frequency"]; label: string }[] =
 export default function AlertsPage() {
   const queryClient = useQueryClient();
 
-  const feed = useQuery({ queryKey: ["notifications"], queryFn: getNotifications });
+  const feed = useQuery({ queryKey: keys.notifications.feed(), queryFn: getNotifications });
   const preferences = useQuery({
-    queryKey: ["notification-preferences"],
+    queryKey: keys.notifications.preferences(),
     queryFn: getPreferences,
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: keys.notifications.feed() });
 
   const generate = useMutation({ mutationFn: generateNotifications, onSuccess: invalidate });
   const readOne = useMutation({ mutationFn: markNotificationRead, onSuccess: invalidate });
@@ -101,7 +103,7 @@ export default function AlertsPage() {
           ...changes,
         });
       }
-      await queryClient.cancelQueries({ queryKey: ["notification-preferences"] });
+      await queryClient.cancelQueries({ queryKey: keys.notifications.preferences() });
       return { previous };
     },
     onError: (_error, _changes, context) => {
@@ -109,7 +111,8 @@ export default function AlertsPage() {
         queryClient.setQueryData(["notification-preferences"], context.previous);
       }
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["notification-preferences"] }),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: keys.notifications.preferences() }),
   });
 
   return (

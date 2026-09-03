@@ -93,6 +93,11 @@ source_modules =
     app.modules.receipts
     app.modules.categorization
     app.modules.analytics
+    app.modules.sms
+    app.modules.personalization
+    app.modules.pricegraph
+    app.modules.points
+    app.modules.community
 forbidden_modules =
     app.modules.finance.repository
 
@@ -111,5 +116,263 @@ type = forbidden
 allow_indirect_imports = true
 source_modules =
     app.modules.categorization
+    app.modules.personalization
+    app.modules.points
+    app.modules.community
 forbidden_modules =
     app.modules.finance.models
+
+[importlinter:contract:sms-internals-are-private]
+name = Only the sms module may import its own models, repository, and parser
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    app.api.system
+    app.api.v1
+    app.api.middleware
+; `app.workers` is a source module deliberately: the XML import task must go
+; through SmsService, exactly as workers/tasks/receipts.py goes through
+; ReceiptService. A task reaching straight into the repository would also
+; escape the tenant-scoping sweep, which only sees repositories imported
+; through app.main.
+    app.workers
+    app.modules.finance
+    app.modules.categorization
+    app.modules.analytics
+    app.modules.personalization
+    app.modules.pricegraph
+    app.modules.points
+    app.modules.community
+forbidden_modules =
+    app.modules.sms.models
+    app.modules.sms.repository
+    app.modules.sms.parser
+
+[importlinter:contract:the-sms-parser-is-pure]
+name = The SMS parser is pure -- no database, no session, no sibling modules
+type = forbidden
+; The highest-value contract of the SMS work. Keeping the parser free of a
+; session is what lets a bank template be exercised against a fixture in
+; microseconds, which is the same property that makes advisor/rubric.py and
+; market/reliability.py runnable across a whole matrix in one test run.
+;
+; `include_external_packages = False` means this cannot also forbid sqlalchemy
+; itself; `test_the_parser_touches_no_database` covers that with a source scan.
+source_modules =
+    app.modules.sms.parser
+forbidden_modules =
+    app.core.database
+    app.core.repository
+    app.core.cache
+    app.core.redis
+    app.modules.sms.models
+    app.modules.sms.service
+    app.modules.sms.repository
+
+[importlinter:contract:offer-adapters-stay-behind-the-port]
+name = No module names a concrete offer-search adapter
+type = forbidden
+allow_indirect_imports = true
+; `app.adapters.offers` -- the factory package -- is deliberately absent, in the
+; same way `app.adapters.pricing` is legitimately imported by advisor/service.py.
+; The rule is that a module may ask for *the configured* adapter and may not name
+; a particular one.
+;
+; This makes port substitutability a build failure. The equivalent guarantee for
+; `PriceProvider` is currently a test that greps the advisor's source
+; (tests/unit/test_market.py) -- weaker, and worth retrofitting to this shape.
+source_modules =
+    app.modules
+forbidden_modules =
+    app.adapters.offers.serpapi
+    app.adapters.offers.scraper
+
+
+; --- the personalization database (ADR-011) -------------------------------
+
+[importlinter:contract:the-signals-database-has-one-owner]
+name = Only the personalization module opens the second database
+type = forbidden
+allow_indirect_imports = true
+; The contract this file exists for. `import-linter` is module-granular and
+; cannot forbid a *function*, which is why the second engine lives in its own
+; module rather than as three more functions in `core/database.py` -- a file
+; every module legitimately imports.
+;
+; The task modules are listed one by one rather than as a blanket
+; `app.workers`, because `app.workers.tasks.personalization` is a legitimate
+; consumer and the others are not. Every task in this codebase opens its own
+; session -- `worker_async_session` appears in the forecasting, market and sms
+; tasks -- and the personalization sweep opens its two the same way. What must
+; not happen is a *different* task, or a different module, acquiring a second
+; engine; enumerating the siblings says exactly that.
+;
+; It still reaches the data through PersonalizationService, so the
+; subject-scoping sweep sees the repositories and
+; `personalization-internals-are-private` still holds.
+;
+; `app.main` is absent -- it is the composition root and disposes the pool on
+; shutdown, which is the one legitimate lifecycle call from outside. Readiness
+; is *not* an exception: `app/api/system.py` asks
+; `PersonalizationService.health()`, and api -> modules is a permitted
+; direction.
+source_modules =
+    app.api
+    app.workers.celery_app
+    app.workers.tasks.receipts
+    app.workers.tasks.forecasting
+    app.workers.tasks.market
+    app.workers.tasks.notifications
+    app.workers.tasks.sms
+    app.modules.advisor
+    app.modules.analytics
+    app.modules.auth
+    app.modules.categorization
+    app.modules.finance
+    app.modules.forecasting
+    app.modules.health
+    app.modules.insights
+    app.modules.market
+    app.modules.notifications
+    app.modules.receipts
+    app.modules.simulator
+    app.modules.sms
+    app.modules.pricegraph
+    app.modules.points
+    app.modules.community
+forbidden_modules =
+    app.core.signals_database
+    app.core.signals_base
+    app.core.signals_repository
+
+[importlinter:contract:personalization-internals-are-private]
+name = Only personalization may import its own models and repository
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    app.api.system
+    app.api.v1
+    app.api.middleware
+    app.workers
+forbidden_modules =
+    app.modules.personalization.models
+    app.modules.personalization.repository
+
+[importlinter:contract:personalization-derivation-is-pure]
+name = The personalization rubric is pure -- no database, no session, no siblings
+type = forbidden
+; Same argument as `the-sms-parser-is-pure`, and the same payoff: a percentile
+; threshold and a cadence can be exercised over a matrix of synthetic histories
+; in one fast test, with no database and no fixtures, which is what makes the
+; rubric something you can actually reason about.
+source_modules =
+    app.modules.personalization.derive
+    app.modules.personalization.archetypes
+forbidden_modules =
+    app.core.database
+    app.core.signals_database
+    app.core.repository
+    app.core.signals_repository
+    app.core.cache
+    app.core.redis
+    app.modules.personalization.models
+    app.modules.personalization.service
+    app.modules.personalization.repository
+
+
+; --- the crowdsourced price graph (ADR-013) -------------------------------
+
+[importlinter:contract:the-pricegraph-normalizer-is-pure]
+name = Item normalisation is pure -- no database, no session, no siblings
+type = forbidden
+; Same argument as `the-sms-parser-is-pure`, and the same payoff. Deciding
+; whether "AMUL TAAZA 500ML" and "Amul Taaza Milk 0.5L" are one product is a
+; question about strings, and keeping it answerable without a session is what
+; lets a thousand real grocery lines be exercised in one fast test. Rules like
+; these are worthless without that.
+source_modules =
+    app.modules.pricegraph.normalize
+forbidden_modules =
+    app.core.database
+    app.core.signals_database
+    app.core.repository
+    app.core.cache
+    app.core.redis
+    app.modules.pricegraph.models
+    app.modules.pricegraph.service
+    app.modules.pricegraph.matching
+
+[importlinter:contract:pricegraph-internals-are-private]
+name = Only pricegraph may import its own models, repository and matching
+type = forbidden
+allow_indirect_imports = true
+; `app.modules.receipts` is deliberately ABSENT.
+;
+; `ReceiptService` writes `receipt_promotions` and `receipt_fingerprints`, and
+; that is the right place for it: those two tables are the tenant-scoped record
+; of what a receipt contributed, and the alternative -- letting `pricegraph`
+; import `receipts.models` -- points the dependency the wrong way and would put
+; a shared-data module inside the PII one.
+source_modules =
+    app.api.system
+    app.api.v1
+    app.api.middleware
+    app.modules.finance
+    app.modules.categorization
+    app.modules.analytics
+    app.modules.sms
+    app.modules.personalization
+forbidden_modules =
+    app.modules.pricegraph.models
+    app.modules.pricegraph.matching
+
+[importlinter:contract:points-internals-are-private]
+name = Only points may import its own models
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    app.api.system
+    app.api.v1
+    app.api.middleware
+    app.modules.finance
+    app.modules.categorization
+    app.modules.analytics
+    app.modules.sms
+    app.modules.personalization
+    app.modules.receipts
+forbidden_modules =
+    app.modules.points.models
+
+
+[importlinter:contract:the-trust-rubric-is-pure]
+name = The trust rubric is pure -- no database, no session, no siblings
+type = forbidden
+; Trust gates whether one person's contribution reaches everybody else, so the
+; weights had better be something you can reason about. Keeping the rubric free
+; of a session is what lets a matrix of contribution histories run in one fast
+; test -- the same argument as `the-sms-parser-is-pure`.
+source_modules =
+    app.modules.community.trust
+forbidden_modules =
+    app.core.database
+    app.core.repository
+    app.modules.community.models
+    app.modules.community.service
+
+[importlinter:contract:community-internals-are-private]
+name = Only community may import its own models
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    app.api.system
+    app.api.v1
+    app.api.middleware
+    app.modules.finance
+    app.modules.categorization
+    app.modules.analytics
+    app.modules.sms
+    app.modules.personalization
+    app.modules.receipts
+    app.modules.pricegraph
+forbidden_modules =
+    app.modules.community.models

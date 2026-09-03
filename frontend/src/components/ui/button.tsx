@@ -13,11 +13,24 @@ const button = cva(
   {
     variants: {
       variant: {
-        // Near-black on off-white, and the reverse in dark. The one saturated
-        // colour in the palette is reserved for data and status, never chrome.
-        // Opacity rather than a second colour: ink -> ink-secondary is a large
-        // visible jump in both modes, where this reads as a press.
+        // Near-black on off-white, and the reverse in dark. Still the workhorse:
+        // most primary actions in the application are the obvious next step on a
+        // screen the user already chose to be on, and they do not need to be
+        // branded to be found. Opacity rather than a second colour: ink ->
+        // ink-secondary is a large visible jump in both modes, where this reads
+        // as a press.
         primary: "bg-ink text-page hover:opacity-90",
+        // The brand reservation, and the only variant that uses it. Reserved for
+        // moments where the action carries the product's identity rather than a
+        // screen's workflow: signing up, starting a trial, loading demo data.
+        //
+        // This is not the "saturated colour is for data" rule being broken -- it
+        // is the carve-out that keeps it intact. `--brand` is defined in
+        // globals.css as chrome-only and sits at a lightness the chart palette
+        // never reaches, which is what stops it reading as a series.
+        //
+        // Deliberately scarce: a screen with two brand buttons has none.
+        brand: "bg-brand text-brand-contrast hover:bg-brand-strong",
         // Hover shifts the border as well as the fill. On a bordered surface the
         // fill change alone is nearly invisible at these contrast ratios.
         secondary:

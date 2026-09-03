@@ -27,8 +27,31 @@ say "Deploying to ${REMOTE}"
 
 # --- preflight --------------------------------------------------------------
 
+# Reachability and bootstrap state are different failures with different
+# remedies, and conflating them sent one operator to read a log on a machine
+# they could not connect to. Distinguish them before saying anything.
+if ! nc -z -G 8 "${HOST}" 22 2>/dev/null; then
+  cat >&2 <<EOF
+Cannot reach ${HOST} on port 22.
+
+The instance is probably fine -- check whether it is serving HTTPS:
+
+  curl -fsS https://${HOST}/health/ready
+
+If that answers, only SSH is blocked, and the cause is almost always that your
+ISP moved your address since the security group was last updated. One command
+fixes it:
+
+  ./allow-my-ip.sh
+
+If port 443 is also silent, the instance really is down or terminated.
+EOF
+  exit 1
+fi
+
 ssh -o ConnectTimeout=10 "${REMOTE}" 'test -f /opt/frugal/.bootstrapped' || {
-  echo "The instance has not finished cloud-init. Check /var/log/cloud-init-output.log" >&2
+  echo "Connected, but the instance has not finished cloud-init." >&2
+  echo "Check /var/log/cloud-init-output.log on the box." >&2
   exit 1
 }
 
@@ -84,12 +107,29 @@ docker compose -f docker-compose.prod.yml --env-file /opt/frugal/.env build api
 docker compose -f docker-compose.prod.yml --env-file /opt/frugal/.env \
   run --rm -e DATABASE_URL="${DATABASE_DIRECT_URL}" api \
   alembic upgrade head
+
+# The second database (ADR-011), when there is one. The wrapper skips cleanly
+# and says so when SIGNALS_DATABASE_URL is unset -- `alembic_signals/env.py`
+# itself raises rather than no-opping, because a migration runner that silently
+# does nothing is how a schema drifts.
+docker compose -f docker-compose.prod.yml --env-file /opt/frugal/.env \
+  run --rm \
+  -e SIGNALS_DATABASE_URL="${SIGNALS_DATABASE_DIRECT_URL:-${SIGNALS_DATABASE_URL:-}}" api \
+  python -m scripts.migrate_signals
 REMOTE_SCRIPT
 
 say "Starting services"
 ssh "${REMOTE}" bash -euo pipefail <<'REMOTE_SCRIPT'
 cd /opt/frugal/infra/aws
 docker compose -f docker-compose.prod.yml --env-file /opt/frugal/.env up -d --build
+
+# Caddy's config is a mounted file, not part of its image, so `up -d --build`
+# sees nothing to change and leaves the container running the config it started
+# with. A new route in the Caddyfile then 404s exactly as though the API did not
+# implement it -- which cost an afternoon once, because the API *did* implement
+# it and answered correctly on localhost the whole time.
+docker compose -f docker-compose.prod.yml --env-file /opt/frugal/.env \
+  up -d --force-recreate --no-deps caddy
 
 echo "waiting for the API to report ready"
 for _ in $(seq 1 30); do
@@ -109,6 +149,18 @@ exit 1
 REMOTE_SCRIPT
 
 say "Deployed"
+
+# By DOMAIN, not by IP. Caddy serves its certificate by SNI, so a request
+# addressed to the raw address presents no matching name and the handshake is
+# aborted before any certificate is even offered -- which fails identically to a
+# broken deploy, and fails the same way with `-k`.
+DOMAIN=$(ssh "${REMOTE}" 'grep -E "^DOMAIN=" /opt/frugal/.env | cut -d= -f2-' 2>/dev/null || true)
+CHECK_HOST="${DOMAIN:-$HOST}"
+
 echo "Check it from here, not from the instance — that also proves the security"
-echo "group and TLS are right, which a request from localhost does not:"
-echo "  curl -fsS https://${HOST}/health/ready"
+echo "group, DNS and TLS are right, which a request from localhost does not:"
+echo "  curl -fsS https://${CHECK_HOST}/health/ready"
+if [ -z "${DOMAIN}" ]; then
+  echo
+  echo "(No DOMAIN in /opt/frugal/.env, so Caddy is serving plain HTTP on :80.)"
+fi

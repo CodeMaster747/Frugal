@@ -111,12 +111,63 @@ class TestEveryRepositoryIsScoped:
         checked = []
         for repo_cls in subclasses:
             if not hasattr(repo_cls.model, "user_id"):
+                # Skipping is legitimate for shared reference data -- products,
+                # offer_snapshots, categories. It is never legitimate for a
+                # signals model: that would be a table in the *other* database
+                # mapped onto a repository whose scoping mechanism does not
+                # exist over there, and this `continue` would wave it through.
+                from app.core.signals_base import SignalsBase
+
+                assert not issubclass(repo_cls.model, SignalsBase), (
+                    f"{repo_cls.__name__} maps a personalization table onto "
+                    "BaseRepository. Use SignalsRepository, which scopes by "
+                    "`subject_id` -- see ADR-011."
+                )
                 continue
             statement = sql(repo_cls(None).scoped_select(user_id))  # type: ignore[arg-type]
             assert "user_id" in statement, f"{repo_cls.__name__} builds an unscoped query"
             checked.append(repo_cls.__name__)
 
         assert "RefreshTokenRepository" in checked
+
+
+class TestEverySignalsRepositoryIsScoped:
+    """The same sweep for the second database (ADR-011).
+
+    A separate class over a separate base, deliberately. Sharing one would let
+    `test_all_tenant_repositories_emit_a_user_predicate` check a signals
+    repository for a `user_id` predicate that cannot exist there -- and its
+    `hasattr` guard would skip it silently, which is the failure this pair of
+    tests is arranged to make impossible.
+    """
+
+    def test_all_signals_repositories_emit_a_subject_predicate(self, user_id):
+        # Importing for the side effect of subclass registration.
+        import app.modules.personalization.repository  # noqa: F401
+        from app.core.signals_repository import SignalsRepository
+
+        subclasses = [c for c in SignalsRepository.__subclasses__() if hasattr(c, "model")]
+        assert subclasses, "no signals repositories registered"
+
+        for repo_cls in subclasses:
+            statement = sql(repo_cls(None).scoped_select(user_id))  # type: ignore[arg-type]
+            assert "subject_id" in statement, f"{repo_cls.__name__} builds an unscoped query"
+
+    def test_a_model_without_a_subject_is_refused(self, user_id):
+        """The mechanism working, not an obstacle to route around.
+
+        `profile_archetypes` is shared reference data with no owner, and
+        reaching it through a subject-scoped repository must fail loudly rather
+        than quietly returning everyone's rows.
+        """
+        from app.core.signals_repository import SignalsRepository
+        from app.modules.personalization.models import ProfileArchetype
+
+        class ArchetypeRepo(SignalsRepository[ProfileArchetype]):  # type: ignore[type-var]
+            model = ProfileArchetype
+
+        with pytest.raises(TypeError, match="no subject_id"):
+            ArchetypeRepo(None).scoped_select(user_id)  # type: ignore[arg-type]
 
     def test_the_users_table_is_the_documented_exception(self):
         """`users` cannot be tenant-scoped -- a login lookup happens *before* an

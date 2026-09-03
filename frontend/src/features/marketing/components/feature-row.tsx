@@ -31,7 +31,7 @@ export function FeatureRow({
     <div className="grid items-center gap-8 lg:grid-cols-2 lg:gap-12">
       <div className={cn("space-y-4", mediaLeft && "lg:order-2")}>
         <p className="type-eyebrow text-ink-muted">{eyebrow}</p>
-        <h2 className="type-display text-balance">{title}</h2>
+        <h2 className="type-editorial text-balance">{title}</h2>
         <p className="max-w-prose type-body text-ink-secondary">{body}</p>
         <ul className="space-y-2">
           {points.map((point) => (

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import CurrentUserDep
 from app.core.errors import NotFoundError
+from app.modules.market import offers as market_offers
 from app.modules.market import reliability as reliability_module
 from app.modules.market.models import WishlistItem
 from app.modules.market.service import MarketService, summarise_item
@@ -295,3 +296,120 @@ async def published_rubric(current: CurrentUserDep) -> dict[str, Any]:
     """
     del current
     return reliability_module.published()
+
+
+class RetailOfferOut(BaseModel):
+    title: str
+    price: Decimal
+    currency: str
+    seller: str
+    #: Empty for simulated offers, which have nowhere real to link to.
+    link: str
+    as_of: datetime
+    provider: str
+    seller_rating: Decimal | None = None
+    rating_count: int | None = None
+    delivery_note: str | None = None
+    thumbnail_url: str | None = None
+    reliability: ReliabilityOut
+
+    @field_serializer("price", when_used="json")
+    def _price(self, value: Decimal) -> str:
+        return format(value, "f")
+
+    @field_serializer("seller_rating", when_used="json")
+    def _rating(self, value: Decimal | None) -> str | None:
+        return None if value is None else format(value, "f")
+
+
+class OfferSearchOut(BaseModel):
+    """Offers for a query, ordered cheapest first.
+
+    Ordering by price asserts nothing -- it is arithmetic over a column, so
+    there is no score to decompose and ADR-002's validator has nothing to fire
+    on. What *is* a judgement, each offer's reliability, carries the published
+    rubric's full factor list exactly as the wishlist does.
+    """
+
+    query: str
+    offers: list[RetailOfferOut]
+    #: `serpapi`, `simulated`, or `cache`. Named so the UI can say where a
+    #: price came from rather than implying they are all live listings.
+    source: str
+    #: `ok` or `paused`.
+    service_status: str
+    caveats: list[str]
+    saving: Decimal | None = None
+    saving_percent: Decimal | None = None
+
+    @field_serializer("saving", "saving_percent", when_used="json")
+    def _decimals(self, value: Decimal | None) -> str | None:
+        return None if value is None else format(value, "f")
+
+
+@router.get("/offers", response_model=OfferSearchOut)
+async def search_offers(
+    current: CurrentUserDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    q: Annotated[str, Query(min_length=2, max_length=120)],
+    limit: Annotated[int, Query(ge=1, le=20)] = 10,
+    compare_to: Decimal | None = None,
+) -> OfferSearchOut:
+    """Where a product is cheapest right now.
+
+    Behind an explicit user action, and never called from a scheduled sweep.
+    At a couple of hundred searches a month for the whole deployment, an
+    automatic call is the entire allowance.
+
+    Degrades rather than failing: when the allowance is spent this returns
+    simulated prices with `service_status: "paused"` and a caveat naming the
+    contact, because a paused price comparison must not take down the
+    affordability answer that was the point.
+    """
+    result = await market_offers.find_offers(
+        db, query=q, user_id=current.id, limit=limit, compare_to=compare_to
+    )
+    await db.commit()
+
+    return OfferSearchOut(
+        query=q,
+        offers=[
+            RetailOfferOut(
+                title=s.offer.title,
+                price=s.offer.price,
+                currency=s.offer.currency,
+                seller=s.offer.seller,
+                link=s.offer.link,
+                as_of=s.offer.as_of,
+                provider=s.offer.provider,
+                seller_rating=s.offer.seller_rating,
+                rating_count=s.offer.rating_count,
+                delivery_note=s.offer.delivery_note,
+                thumbnail_url=s.offer.thumbnail_url,
+                reliability=ReliabilityOut(
+                    score=s.reliability.score,
+                    band=s.reliability.band,
+                    confidence=s.reliability.confidence.value,
+                    rubric_version=s.reliability.rubric_version,
+                    signals=[
+                        SignalOut(
+                            key=sig.key.value,
+                            name=sig.name,
+                            value=sig.value,
+                            weight=sig.weight,
+                            contribution=sig.contribution,
+                            detail=sig.detail,
+                        )
+                        for sig in s.reliability.signals
+                    ],
+                    caveats=list(s.reliability.caveats),
+                ),
+            )
+            for s in result.offers
+        ],
+        source=result.source,
+        service_status=result.service_status,
+        caveats=result.caveats,
+        saving=result.saving,
+        saving_percent=result.saving_percent,
+    )

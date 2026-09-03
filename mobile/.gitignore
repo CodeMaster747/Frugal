@@ -1,0 +1,20 @@
+node_modules/
+
+# The signing key and its password. Losing this file means never being able to
+# ship an update that installs over an existing install -- Android identifies an
+# app by package name *plus* signing key, so a rebuild with a new keystore is a
+# different app to the OS. Back it up somewhere outside the repo.
+keystore/
+
+# The whole native project is generated: `npx cap add android` scaffolds it and
+# `setup-android.sh` applies everything this project needs on top. Committing it
+# would mean the flavours, the Kotlin plugin and the plugin registrars existed in
+# two places -- android-overlay/ and android/ -- and the two would drift, with the
+# copy that actually builds being the one nobody edits.
+#
+# Capacitor's own docs suggest committing it. The trade is deliberate, and it is
+# only defensible because CI regenerates it from scratch on every run and then
+# asserts the permission separation held.
+android/
+
+

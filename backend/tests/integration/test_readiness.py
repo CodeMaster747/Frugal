@@ -18,13 +18,42 @@ class TestReadiness:
 
         assert response.status_code == 200, f"not ready: {body}"
         assert body["status"] == "ready"
-        assert body["dependencies"] == {"database": True, "redis": True}
+        assert body["dependencies"]["database"] is True
+        assert body["dependencies"]["redis"] is True
 
     async def test_names_each_dependency_individually(self, client):
         """A single boolean would say the service is unhealthy without saying
         which dependency to look at."""
         deps = (await client.get("/health/ready")).json()["dependencies"]
-        assert set(deps) == {"database", "redis"}
+        assert set(deps) == {"database", "redis", "personalization"}
+
+    async def test_personalization_reports_its_own_state(self, client, settings):
+        """`None` when unconfigured, a boolean when there is a database to ask.
+
+        Absent is not degraded. A deployment that never turned personalization
+        on must not report a dependency as down, or readiness becomes noise
+        that operators learn to ignore -- which is how the M11 CloudWatch alarm
+        ended up unable to fire.
+        """
+        deps = (await client.get("/health/ready")).json()["dependencies"]
+
+        if settings.personalization_enabled:
+            assert deps["personalization"] is True
+        else:
+            assert deps["personalization"] is None
+
+    async def test_a_personalization_outage_does_not_take_the_process_down(self, client):
+        """503 stops the load balancer routing here.
+
+        Personalization serves recommendations; the ledger works without it.
+        Returning 503 for its absence would take a working product offline to
+        report a degraded extra, so readiness reports it and stays ready.
+        """
+        response = await client.get("/health/ready")
+        body = response.json()
+
+        assert response.status_code == 200
+        assert body["status"] == "ready"
 
 
 class TestDatabase:

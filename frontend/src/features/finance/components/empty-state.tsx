@@ -31,7 +31,7 @@ export function EmptyState({ name }: { name: string }) {
   return (
     <div className="space-y-8">
       <div className="space-y-2">
-        <h1 className="type-display text-balance">Welcome to Frugal, {name}</h1>
+        <h1 className="type-editorial text-balance">Welcome to Frugal, {name}</h1>
         <p className="max-w-prose type-body text-ink-secondary">
           Frugal needs some financial history before it can advise you. Start with any of these
           — you can change everything later.

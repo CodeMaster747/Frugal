@@ -35,6 +35,15 @@ os.environ.setdefault("LOG_LEVEL", "WARNING")
 # not depend on it being up.
 os.environ["STORAGE_BACKEND"] = "memory"
 os.environ["OCR_ENGINE"] = "fake"
+# The personalization database (ADR-011). Assigned rather than setdefault, for
+# the same reason as the two above: the api container's own environment points
+# at the local *development* signals database, and a test run must not touch
+# it. Settings refuses to boot if this resolves to the same endpoint as
+# DATABASE_URL, so the two names below must stay different.
+os.environ["SIGNALS_DATABASE_URL"] = os.environ.get(
+    "TEST_SIGNALS_DATABASE_URL",
+    "postgresql+asyncpg://frugal:frugal@localhost:5432/frugal_signals_test",
+)
 
 from app.core.config import get_settings
 from app.main import create_app
@@ -64,6 +73,14 @@ def migrated_database(request):
         cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
         upgrade(cfg, "head")
+
+        # The second tree, in its own database with its own history and its own
+        # version table (ADR-011). Primary first: nothing here depends on that
+        # order, but every other runner in this repo uses it and a test fixture
+        # that disagreed would be one more thing to hold in mind.
+        signals_cfg = Config(str(BACKEND_ROOT / "alembic_signals.ini"))
+        signals_cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic_signals"))
+        upgrade(signals_cfg, "head")
 
         # The product catalogue is shared reference data that the application
         # syncs on startup -- and `ASGITransport` does not run the lifespan, so
@@ -161,8 +178,56 @@ async def isolated_test() -> AsyncIterator[None]:
         # correct: it removes rows whose `user_id` matches a deleted user and
         # leaves the shared taxonomy, which has no owner, alone.
         await conn.execute(text("DELETE FROM users"))
-        # No foreign key by design, so nothing cascades into it.
-        await conn.execute(text("TRUNCATE audit_log"))
+        # No foreign key by design, so nothing cascades into them.
+        #
+        # The quota ledger and the offer cache are deployment-scoped, not
+        # user-scoped -- a free-tier allowance belongs to the install, not to a
+        # person -- so `DELETE FROM users` does not reach them. Exactly the leak
+        # the comment above describes: without these two lines, a test that
+        # exhausts a cap leaves it exhausted for every test after it, and the
+        # failure looks like a bug in the code under test.
+        await conn.execute(
+            text(
+                "TRUNCATE audit_log, external_quota_usage, offer_snapshots, erasure_requests, "
+                # The crowdsourced price graph is deployment-scoped, not
+                # user-scoped: a price at a shop is a fact about the shop, so
+                # these tables carry no `user_id` and `DELETE FROM users` does
+                # not reach them. Exactly the leak the comment above describes --
+                # without these lines a canonical item created by one test
+                # collides with the same item in the next, and the failure looks
+                # like a bug in the code under test.
+                #
+                # CASCADE because `price_observations` and the alias tables hang
+                # off `canonical_items` and `stores`. `rewards` is absent on
+                # purpose: it is seeded reference data, like the category
+                # taxonomy, and truncating it would leave every later run broken
+                # with no hint as to why.
+                "stores, canonical_items, price_observations, receipt_fingerprints, "
+                # Scraper state is deployment-scoped too: a host budget spent
+                # by one test would refuse the next one's fetch, and the
+                # failure would look like a bug in the adapter.
+                "scraper_host_budget, robots_policies, scraped_offer_snapshots, "
+                "store_confirmations CASCADE"
+            )
+        )
+
+    # The personalization database has no `users` table and therefore no
+    # cascade -- which is the entire design, and also exactly the leak the
+    # comment above describes. `DELETE FROM users` reaches nothing over here.
+    #
+    # Discovered from the metadata rather than listed, so a table added later is
+    # cleaned without anyone remembering to add it here. A hand-maintained list
+    # is how the twelve-table TRUNCATE above went wrong in both directions.
+    if get_settings().personalization_enabled:
+        from app.core.signals_base import SignalsBase
+        from app.core.signals_database import get_signals_engine
+
+        names = ", ".join(t.name for t in SignalsBase.metadata.sorted_tables)
+        if names:
+            async with get_signals_engine().begin() as conn:
+                # Interpolated, and safe: `names` comes from the declarative
+                # metadata, never from input.
+                await conn.execute(text(f"TRUNCATE {names}"))
 
     redis = get_redis()
     # Rate-limit counters, cached aggregates, data versions, and idempotency
@@ -174,6 +239,10 @@ async def isolated_test() -> AsyncIterator[None]:
     # 2. Release loop-bound connections and drop the cached clients, so the
     #    next test builds its own against its own loop.
     await get_async_engine().dispose()
+    if get_settings().personalization_enabled:
+        from app.core.signals_database import get_signals_engine
+
+        await get_signals_engine().dispose()
     await redis.aclose()
     get_redis.cache_clear()
 
@@ -205,6 +274,15 @@ async def db_session() -> AsyncIterator[AsyncSession]:  # noqa: F821
     from app.core.database import get_async_session_factory
 
     async with get_async_session_factory()() as session:
+        yield session
+
+
+@pytest.fixture
+async def signals_session() -> AsyncIterator[AsyncSession]:  # noqa: F821
+    """Direct session on the personalization database (ADR-011)."""
+    from app.core.signals_database import get_signals_session_factory
+
+    async with get_signals_session_factory()() as session:
         yield session
 
 

@@ -21,6 +21,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import dispose_engines
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
+from app.core.signals_database import dispose_signals_engine
 
 logger = get_logger(__name__)
 
@@ -59,6 +60,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     logger.info("shutting down")
     await dispose_engines()
+    # The composition root is the one place outside the personalization
+    # module that may name the second engine, and this is the reason:
+    # somebody has to close the pool. It builds nothing on a deployment
+    # that never used it.
+    await dispose_signals_engine()
     await close_redis()
 
 
@@ -66,12 +72,19 @@ def _build_object_store(settings: Settings) -> object:
     """Choose the storage adapter.
 
     `s3` covers AWS S3, Cloudflare R2, Backblaze, and MinIO -- they differ only
-    by endpoint. `memory` is the fake that lets the suite run with no network.
+    by endpoint. `azure_blob` is a separate adapter because Azure is not
+    S3-compatible (ADR-010). `memory` is the fake that lets the suite run with
+    no network.
     """
     if settings.storage_backend == "memory":
         from app.adapters.storage.memory import InMemoryObjectStore
 
         return InMemoryObjectStore()
+
+    if settings.storage_backend == "azure_blob":
+        from app.adapters.storage.azure_blob import AzureBlobObjectStore
+
+        return AzureBlobObjectStore(settings)
 
     from app.adapters.storage.s3 import S3ObjectStore
 

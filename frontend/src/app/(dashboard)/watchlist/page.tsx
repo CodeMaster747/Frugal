@@ -22,6 +22,7 @@ import {
   type WishlistItem,
 } from "@/features/market/api";
 import { formatDate, formatMoney } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 
 export default function WatchlistPage() {
   const queryClient = useQueryClient();
@@ -30,23 +31,23 @@ export default function WatchlistPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [showRubric, setShowRubric] = useState(false);
 
-  const wishlist = useQuery({ queryKey: ["wishlist"], queryFn: getWishlist });
-  const alerts = useQuery({ queryKey: ["price-alerts"], queryFn: getAlerts });
+  const wishlist = useQuery({ queryKey: keys.market.wishlist(), queryFn: getWishlist });
+  const alerts = useQuery({ queryKey: keys.market.alerts(), queryFn: getAlerts });
   const results = useQuery({
-    queryKey: ["watchlist-search", submitted],
+    queryKey: keys.market.search(submitted),
     queryFn: () => searchProducts(submitted),
     enabled: submitted.length > 0,
   });
   const rubric = useQuery({
-    queryKey: ["reliability-rubric"],
+    queryKey: keys.market.reliabilityRubric(),
     queryFn: getReliabilityRubric,
     enabled: showRubric,
   });
 
   const invalidate = () =>
     Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["wishlist"] }),
-      queryClient.invalidateQueries({ queryKey: ["price-alerts"] }),
+      queryClient.invalidateQueries({ queryKey: keys.market.wishlist() }),
+      queryClient.invalidateQueries({ queryKey: keys.market.alerts() }),
     ]);
 
   const track = useMutation({
@@ -219,7 +220,7 @@ function TrackedItem({
   onRemove: () => void;
 }) {
   const detail = useQuery({
-    queryKey: ["product-detail", item.product_id],
+    queryKey: keys.market.product(item.product_id),
     queryFn: () => getProductDetail(item.product_id),
     enabled: expanded,
   });

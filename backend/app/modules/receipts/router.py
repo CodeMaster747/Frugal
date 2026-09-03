@@ -60,6 +60,10 @@ class UploadResponse(BaseModel):
     upload_url: str
     expires_in: int
     accepted_types: list[str]
+    #: Headers the client must send with the PUT. Empty on S3; Azure needs
+    #: `x-ms-blob-type`. The client spreads these rather than knowing which
+    #: backend it is uploading to.
+    upload_headers: dict[str, str] = Field(default_factory=dict)
 
 
 class JobResponse(BaseModel):
@@ -147,6 +151,7 @@ async def create_upload_url(
         upload_url=ticket.upload_url,
         expires_in=ticket.expires_in,
         accepted_types=sorted(ALLOWED_CONTENT_TYPES),
+        upload_headers=ticket.upload_headers,
     )
 
 

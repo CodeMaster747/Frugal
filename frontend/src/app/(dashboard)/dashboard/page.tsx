@@ -10,9 +10,11 @@ import { Empty } from "@/components/ui/empty";
 import { useAuth } from "@/features/auth/auth-provider";
 import { getDashboard, getSavingsRate, type CategorySlice } from "@/features/analytics/api";
 import { StatTile } from "@/features/analytics/components/stat-tile";
+import { SpendingProfile } from "@/features/personalization/spending-profile";
 import { listAccounts } from "@/features/finance/api";
 import { EmptyState } from "@/features/finance/components/empty-state";
 import { formatMoney } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 
 /** "2026-08" -> "Aug" */
 const monthLabel = (period: string) =>
@@ -28,13 +30,13 @@ export default function Dashboard() {
   const { user } = useAuth();
   const currency = user?.base_currency ?? "INR";
 
-  const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
+  const accounts = useQuery({ queryKey: keys.finance.accounts(), queryFn: listAccounts });
   const dashboard = useQuery({
-    queryKey: ["analytics", "dashboard"],
+    queryKey: keys.analytics.dashboard(),
     queryFn: () => getDashboard(),
   });
   const savings = useQuery({
-    queryKey: ["analytics", "savings-rate"],
+    queryKey: keys.analytics.savingsRate(),
     queryFn: () => getSavingsRate(12),
   });
 
@@ -161,6 +163,10 @@ export default function Dashboard() {
       </div>
 
       <CategoryBreakdown categories={data.top_categories} currency={currency} />
+
+      {/* Renders nothing when there is no profile -- which covers the default
+       * deployment, where no personalization database is configured at all. */}
+      <SpendingProfile />
     </div>
   );
 }

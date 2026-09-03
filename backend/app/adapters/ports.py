@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
@@ -26,9 +26,29 @@ class ObjectStore(Protocol):
     workers and stall the event loop.
     """
 
+    @property
+    def upload_headers(self) -> dict[str, str]:
+        """Headers the client MUST send with the presigned PUT.
+
+        Empty for S3, which needs none. Azure rejects a PUT without
+        `x-ms-blob-type`. Published through the port rather than hardcoded in
+        the frontend so the browser spreads whatever the ticket carries and
+        never learns which backend it is talking to.
+        """
+        ...
+
     async def presign_put(self, key: str, content_type: str, expires_in: int) -> str: ...
 
-    async def presign_get(self, key: str, expires_in: int) -> str: ...
+    async def presign_get(self, key: str, expires_in: int, content_type: str | None = None) -> str:
+        """Short-lived read URL.
+
+        `content_type` stamps the response rather than describing the object:
+        the caller passes the type it *accepted at upload*, and the storage
+        service serves it under that type whatever the stored bytes claim. On
+        Azure this is the only defence against a smuggled payload being served
+        as a document, because a SAS cannot constrain the upload itself.
+        """
+        ...
 
     async def get_bytes(self, key: str) -> bytes: ...
 
@@ -220,6 +240,13 @@ class PriceProvider(Protocol):
     bot detection. A port with a seeded catalogue behind it ships a working
     product; a real adapter is a configuration change, not a rewrite (ADR-004).
 
+    That rejection still stands for everything it described. **ADR-012 narrows
+    it**: an allowlist of hosts, on paths robots.txt permits, rate-limited and
+    failing closed, shipped disabled. What was rejected was reproducing four
+    retailers' catalogues from their product pages; what is permitted is
+    fetching a public endpoint a host has said we may fetch. Read ADR-012 before
+    concluding from this paragraph that no fetching happens anywhere.
+
     `search` returning empty is normal, not an error -- the caller falls back to
     manual entry, because a user who knows the price should never be blocked by
     a catalogue that does not.
@@ -234,6 +261,61 @@ class PriceProvider(Protocol):
     async def alternatives(
         self, offer: ProductOffer, *, max_price: Decimal, limit: int = 3
     ) -> list[ProductOffer]: ...
+
+
+# --- offer search (M13) -----------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class RetailOffer:
+    """One seller's live listing for a searched product.
+
+    Distinct from `ProductOffer`, and deliberately not a subclass. A
+    `ProductOffer` is a catalogue entry with a stable `external_id` that price
+    history can be built on; this is a listing seen once, at a moment, with a
+    link out. It is not tracked, not written to `price_points`, and carries
+    `as_of` so the UI can say how old it is instead of implying it is current.
+    """
+
+    title: str
+    price: Decimal
+    seller: str
+    link: str
+    as_of: datetime
+    provider: str
+    currency: str = "INR"
+    condition: str = "new"
+    seller_rating: Decimal | None = None
+    rating_count: int | None = None
+    delivery_note: str | None = None
+    thumbnail_url: str | None = None
+
+
+@runtime_checkable
+class OfferSearch(Protocol):
+    """Live retail offers for a query.
+
+    Narrower than `PriceProvider` on purpose, and a separate port rather than an
+    extension of it, for three reasons that each independently decide it:
+
+    - `MarketService` needs `catalogue()`, `history()` and `sellers_for()` from
+      its provider. A live search API can supply none of them.
+    - `PriceProvider.alternatives()` means "a cheaper *different* product"; a
+      shopping search returns *the same* product from other sellers. Serving
+      both through one method would make the port's contract depend on
+      configuration, which is the exact thing a port exists to prevent.
+    - The advisor calls `alternatives()` on every evaluation. Routing a metered
+      API through it would spend the month's allowance on requests no user
+      asked for.
+
+    Returning `[]` is normal, not an error -- including when the quota is spent.
+    Every implementation MUST pass through the quota ledger before any network
+    call; the fake is what CI and local development run against.
+    """
+
+    name: str
+
+    async def find_offers(self, query: str, *, limit: int = 10) -> list[RetailOffer]: ...
 
 
 # --- notifications (M10) ----------------------------------------------------
