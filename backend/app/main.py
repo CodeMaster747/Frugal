@@ -14,7 +14,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.middleware import register_exception_handlers, register_middleware
+from app.api.middleware import (
+    CatchAllMiddleware,
+    register_exception_handlers,
+    register_middleware,
+)
 from app.api.system import router as system_router
 from app.api.v1 import api_router
 from app.core.config import Settings, get_settings
@@ -114,6 +118,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.object_store = app_store
+
+    # Registered before CORSMiddleware on purpose. `add_middleware` prepends, so
+    # the first one registered ends up innermost -- which is where the catch-all
+    # has to be for its 500 to travel back out through CORS and pick up the
+    # headers a browser needs before it will show the body. See the class.
+    app.add_middleware(CatchAllMiddleware)
 
     app.add_middleware(
         CORSMiddleware,

@@ -6,6 +6,7 @@ These run against the ASGI app in-process, so they need no database.
 from __future__ import annotations
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from app.core.errors import (
     ConflictError,
@@ -109,3 +110,64 @@ class TestDomainErrors:
         body = NotFoundError("Goal").to_response("req-1").error
         assert body.docs_url == "https://docs.frugal.app/errors/NOT_FOUND"
         assert body.request_id == "req-1"
+
+
+class TestUnhandledErrors:
+    """An unexpected 500 has to reach a cross-origin browser intact.
+
+    The envelope was never the problem -- it has always been correct in the
+    body. The problem was that a browser could not read it. Starlette installs
+    a handler registered for bare `Exception` on `ServerErrorMiddleware`, the
+    outermost layer, so its response was built after `CORSMiddleware` had been
+    unwound and left without an `Access-Control-Allow-Origin` header. Chrome
+    discards such a response and reports a CORS violation, which is a message
+    about the wrong subsystem entirely: six E2E specs failed for two milestones
+    on what looked like a CORS misconfiguration and was an unmigrated database.
+
+    The body assertions below would pass without the fix. The header assertion
+    is the regression guard.
+    """
+
+    @staticmethod
+    def _client(settings) -> AsyncClient:
+        from app.main import create_app
+
+        app = create_app(settings)
+
+        @app.get("/api/v1/_explode", include_in_schema=False)
+        async def explode() -> None:
+            raise RuntimeError("nobody anticipated this")
+
+        # `raise_app_exceptions=False` so a regression shows up as a failed
+        # assertion on the response rather than a RuntimeError out of the
+        # transport, which says much less about what broke.
+        return AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
+        )
+
+    async def test_unhandled_error_is_readable_cross_origin(self, settings):
+        origin = settings.cors_origins[0]
+
+        async with self._client(settings) as client:
+            response = await client.get("/api/v1/_explode", headers={"Origin": origin})
+
+        assert response.status_code == 500
+        assert response.headers["access-control-allow-origin"] == origin
+
+        body = response.json()["error"]
+        assert body["code"] == ErrorCode.INTERNAL_ERROR.value
+        # Internals never leak; the request id is what support is given instead.
+        assert body["message"] == "An unexpected error occurred"
+        assert body["request_id"]
+        assert response.headers["x-request-id"] == body["request_id"]
+
+    async def test_the_request_id_is_exposed_to_the_browser(self, settings):
+        """A header the browser cannot read is not a support handle."""
+        origin = settings.cors_origins[0]
+
+        async with self._client(settings) as client:
+            response = await client.get("/api/v1/_explode", headers={"Origin": origin})
+
+        exposed = response.headers["access-control-expose-headers"]
+        assert "X-Request-ID" in exposed

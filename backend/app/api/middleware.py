@@ -101,7 +101,14 @@ class RequestContextMiddleware:
                 raw = list(message.get("headers", []))
                 present = {name.lower() for name, _ in raw}
 
-                raw.append((b"x-request-id", request_id.encode()))
+                # Guarded like the security headers below, and for the same
+                # reason: `_envelope` already stamps this on every error
+                # response, so appending unconditionally sent `X-Request-ID`
+                # twice on all of them. Valid HTTP, and a client reading the
+                # header gets "id, id" -- a support handle that does not match
+                # the one in the body.
+                if b"x-request-id" not in present:
+                    raw.append((b"x-request-id", request_id.encode()))
                 elapsed = (time.perf_counter() - start) * 1000
                 raw.append((b"x-response-time-ms", f"{elapsed:.2f}".encode()))
                 raw.extend((n, v) for n, v in _SECURITY_HEADERS if n not in present)
@@ -134,6 +141,69 @@ class RequestContextMiddleware:
                     "duration_ms": round((time.perf_counter() - start) * 1000, 2),
                 },
             )
+
+
+class CatchAllMiddleware:
+    """Turns an unhandled exception into the error envelope -- inside CORS.
+
+    There is already an ``@app.exception_handler(Exception)`` below, and it is
+    not redundant with this: Starlette installs a handler registered for bare
+    ``Exception`` on ``ServerErrorMiddleware``, which is the *outermost* layer
+    of the stack. Its response is therefore built after ``CORSMiddleware`` has
+    been unwound, and never passes back through it -- so a 500 leaves with no
+    ``Access-Control-Allow-Origin`` header.
+
+    A browser discards such a response and reports a CORS violation instead.
+    The envelope and its ``request_id`` -- the one handle support has -- are
+    present in the body and unreadable. That is how a plain unmigrated database
+    surfaced as "blocked by CORS policy" and cost a full afternoon: the error
+    said nothing about the error.
+
+    Registering this *before* ``CORSMiddleware`` in ``main.py`` puts it inside
+    CORS (``add_middleware`` prepends, so first-registered is innermost), and
+    the 500 it returns is a normal response that CORS annotates on the way out.
+    The handler below stays as a backstop for a failure in this class itself.
+
+    Raw ASGI for the same reasons as ``RequestContextMiddleware`` above --
+    chiefly that ``BaseHTTPMiddleware`` would run the app in a child task and
+    break request-ID propagation.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        started = False
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception as exc:
+            # Past the response start the status line is already on the wire and
+            # there is nothing left to replace it with. Re-raise and let the
+            # server abort the body, which is the only honest outcome.
+            if started:
+                raise
+            logger.exception("unhandled exception", extra={"error_type": type(exc).__name__})
+            response = _envelope(
+                500,
+                ErrorBody(
+                    code=ErrorCode.INTERNAL_ERROR,
+                    message="An unexpected error occurred",
+                    request_id=get_request_id(),
+                    docs_url="https://docs.frugal.app/errors/INTERNAL_ERROR",
+                ),
+            )
+            await response(scope, receive, send)
 
 
 def _envelope(
@@ -222,6 +292,13 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def handle_unexpected(_: Request, exc: Exception) -> JSONResponse:
+        # A backstop behind `CatchAllMiddleware`, not a duplicate of it. This
+        # one runs on `ServerErrorMiddleware`, outside `CORSMiddleware`, so what
+        # it returns carries no CORS headers -- which is exactly why the
+        # middleware exists and why this is no longer the primary path. Keep it:
+        # it still catches a failure inside the middleware itself, and anything
+        # raised outside its reach.
+        #
         # Never leak internals. The request ID is the support handle.
         logger.exception("unhandled exception", extra={"error_type": type(exc).__name__})
         return _envelope(
