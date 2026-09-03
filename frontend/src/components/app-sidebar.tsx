@@ -4,10 +4,14 @@ import {
   ArrowLeftRight,
   Bell,
   Bookmark,
+  Coins,
   FlaskConical,
+  HandCoins,
   HeartPulse,
   LayoutDashboard,
   LogOut,
+  Map as MapIcon,
+  MessageSquare,
   Receipt,
   Settings,
   ShoppingBag,
@@ -52,6 +56,7 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/dashboard", label: "Overview", Icon: LayoutDashboard },
       { href: "/transactions", label: "Transactions", Icon: ArrowLeftRight },
+      { href: "/transactions/sms", label: "Bank messages", Icon: MessageSquare },
       { href: "/receipts", label: "Receipts", Icon: Receipt },
     ],
   },
@@ -71,24 +76,47 @@ const NAV: NavGroup[] = [
       { href: "/alerts", label: "Alerts", Icon: Bell },
     ],
   },
+  {
+    name: "Community",
+    items: [
+      { href: "/contribute", label: "Add a shop", Icon: MapIcon },
+      { href: "/contributions", label: "My contributions", Icon: HandCoins },
+      { href: "/points", label: "Points", Icon: Coins },
+    ],
+  },
 ];
 
 /** The five that fit a thumb, in the order they are reached for. */
+//: Five, because a sixth would put each tab below the 44px minimum on a small
+//: phone. The map earns its slot by being the screen the app opens on -- a user
+//: who navigates into the dashboard needs one tap back to it, not a browser
+//: gesture.
+//:
+//: "Mine" replaced Advisor here in M19. The sidebar is `hidden md:flex`, so the
+//: whole Community group -- contributions, points, add-a-shop -- was reachable
+//: on a phone only by typing the URL. The Android build is a WebView over this
+//: exact layout, which made that the difference between shipped and not.
+//: Advisor keeps its sidebar entry and is one tap from Overview.
 const MOBILE_TABS: NavItem[] = [
+  { href: "/", label: "Map", Icon: MapIcon },
   { href: "/dashboard", label: "Overview", Icon: LayoutDashboard },
   { href: "/transactions", label: "Txns", Icon: ArrowLeftRight },
-  { href: "/health", label: "Health", Icon: HeartPulse },
-  { href: "/advisor", label: "Advisor", Icon: ShoppingBag },
+  { href: "/contributions", label: "Mine", Icon: HandCoins },
   { href: "/settings", label: "Settings", Icon: Settings },
 ];
 
 /**
  * Every destination matches its own subtree, which is what keeps Transactions
- * lit on `/transactions/import` and Receipts lit on `/receipts/[id]`. No route
- * here is `/` -- the root belongs to the public home screen -- so there is no
- * prefix that would match everything and no exact-match special case.
+ * lit on `/transactions/import` and Receipts lit on `/receipts/[id]`.
+ *
+ * No route here is `/`. That was true when the root was the marketing page and
+ * it is still true now that it is the map: the map is not a sidebar
+ * destination, it is what the app opens on, and listing it would light up on
+ * every prefix. The Map link below goes there explicitly and is compared
+ * exactly.
  */
 function isActive(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -218,7 +246,7 @@ function NavLink({ item: { href, label, Icon }, active }: { item: NavItem; activ
        * surface change is the only thing that fits. */}
       {active && (
         <span
-          className="absolute inset-y-1 left-0 hidden w-0.5 rounded-full bg-series-1 xl:block"
+          className="absolute inset-y-1 left-0 hidden w-0.5 rounded-full bg-brand xl:block"
           aria-hidden
         />
       )}

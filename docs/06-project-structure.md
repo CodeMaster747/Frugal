@@ -15,11 +15,16 @@ frugal/
 ├── docs/                    This documentation set
 ├── .github/workflows/       CI/CD pipelines
 ├── docker-compose.yml       Local development stack
-├── docker-compose.prod.yml  Production stack (EC2)
+├── mobile/                  Capacitor Android shell (a WebView over the live site)
+├── scripts/                 publish-apk-hashes.sh
 ├── Makefile                 Task entry points
 ├── .env.example             Documented configuration shape (no secrets)
 └── README.md
 ```
+
+The production compose files live under `infra/azure/` and `infra/aws/`, not at the root: there
+are two deployments to keep straight and one file named for neither would be the wrong name for
+both.
 
 A **monorepo** for one deployable backend and one frontend. Split repositories would need version
 coordination between the OpenAPI producer and its generated-types consumer for zero benefit at this
@@ -91,27 +96,42 @@ backend/
 │   │   │   │   └── prophet.py     ≥ 180 days — imports Prophet INSIDE the function
 │   │   │   ├── selector.py        Tier selection by observation count
 │   │   │   └── service.py
-│   │   └── advisor/
-│   │       ├── rubric.py          Affordability weights, verdict thresholds
-│   │       ├── simulator.py       Before/after state projection
-│   │       ├── emi.py             Tenure options, total interest
-│   │       └── service.py
+│   │   ├── advisor/
+│   │   │   ├── rubric.py          Affordability weights, verdict thresholds
+│   │   │   ├── simulator.py       Before/after state projection
+│   │   │   ├── emi.py             Tenure options, total interest
+│   │   │   └── service.py
+│   │   ├── market/                M9/M13 — catalogue · price history · wishlist · alerts
+│   │   │   ├── reliability.py     Seller-signal rubric; weights sum to 1.00
+│   │   │   ├── offers.py          Live offer search: cache → adapter → degrade
+│   │   │   └── service.py
+│   │   ├── simulator/             M10 — scenario engine; nothing persisted
+│   │   ├── notifications/         M10 — generation, delivery, per-category preferences
+│   │   └── sms/                   M12 — bank-message ingestion (ADR-009)
+│   │       ├── parser/            PURE: no session, no models, no siblings
+│   │       │   ├── senders.py     The privacy boundary — generated into Kotlin
+│   │       │   ├── normalize.py   Amount/date/tail/VPA fragments · redact()
+│   │       │   ├── registry.py    Sender-first candidate ordering
+│   │       │   └── templates/     7 issuers + upi_generic + card_generic
+│   │       ├── xml_import.py      SMS Backup & Restore, via defusedxml
+│   │       └── service.py         SmsService — the only cross-module entry
 │   │
 │   ├── adapters/                  Ports + implementations
 │   │   ├── ports.py               Protocol definitions
-│   │   ├── storage/               S3Store · MinioStore · InMemoryStore
+│   │   ├── storage/               S3ObjectStore · AzureBlobObjectStore · InMemoryObjectStore
 │   │   ├── ocr/                   TesseractEngine · FakeOCREngine
-│   │   ├── prices/                SeedCatalogProvider · ManualEntryProvider · FakePriceProvider
+│   │   ├── pricing/               SeedCatalogProvider · SimulatedMarket · ManualEntry
+│   │   ├── offers/                SerpApiOfferSearch · SimulatedOfferSearch (M13)
 │   │   └── notify/                EmailNotifier · NullNotifier
 │   │
 │   ├── workers/
-│   │   ├── celery_app.py          Celery config, queues, routing
-│   │   ├── tasks/                 receipts · categorization · forecasting · insights · health
-│   │   └── schedules.py           Beat schedule
+│   │   ├── celery_app.py          Worker entrypoint; autodiscovers the task packages
+│   │   └── tasks/                 receipts · forecasting · market · notifications · sms
 │   │
 │   └── api/
 │       ├── v1.py                  Router aggregation
-│       └── middleware.py          Request ID, timing, error handling, rate limit
+│       ├── system.py              /health/* and the unauthenticated /system/providers
+│       └── middleware.py          Request ID, timing, security headers, error envelope
 │
 ├── alembic/versions/              One migration per milestone
 ├── tests/
@@ -121,7 +141,8 @@ backend/
 │   ├── eval/                      AI eval harnesses + fixture datasets
 │   └── factories/                 Test data builders
 │
-├── scripts/                       seed_categories.py · train_categorizer.py · reconcile_balances.py
+├── scripts/                       dump_openapi.py · generate_sender_filter.py · verify_serpapi.py
+│                                  migrate_signals.py
 ├── pyproject.toml                 Deps, ruff, mypy, pytest, coverage
 ├── .importlinter                  Module boundary contracts — CI-enforced
 └── Dockerfile
@@ -157,6 +178,12 @@ forbidden_modules = app.modules
 
 A boundary rule maintained by code review decays; one maintained by a failing build does not. That is
 the whole reason this file exists.
+
+The two above are illustrative. `backend/.importlinter` carries **nine**, and the later ones are the
+interesting ones: `the-sms-parser-is-pure` (no session, no models, no siblings — which is what lets a
+bank template be exercised against a fixture in microseconds) and
+`offer-adapters-stay-behind-the-port` (no module may *name* `app.adapters.offers.serpapi`; ask the
+factory). Read the file, not this excerpt.
 
 ### 2.2 Two engines, one schema
 
@@ -247,9 +274,15 @@ features/advisor/
 
 ### 3.2 Generated types are the contract
 
-`lib/api/schema.d.ts` is generated from `/openapi.json` by `openapi-typescript` and committed. CI
-regenerates and fails on a diff. A backend field rename therefore surfaces as a **TypeScript compile
-error**, not a runtime `undefined` discovered by a user.
+`lib/api/schema.d.ts` is generated from the OpenAPI document by `openapi-typescript` and committed.
+The `api-types` job in CI dumps the document from `app.openapi()` (no server, no database),
+regenerates, and fails on a diff, so a backend field rename surfaces as a **TypeScript compile
+error** rather than a runtime `undefined` discovered by a user.
+
+That job is newer than this paragraph. For three milestones the claim was here and the check was
+not, and the file drifted a field behind — `upload_headers`, added to the receipt upload ticket by
+ADR-010 so the browser learns Azure's `x-ms-blob-type` requirement without learning which backend it
+is talking to. Regenerate with `make types`.
 
 ### 3.3 The chart container enforces accessibility
 
@@ -278,23 +311,28 @@ The obligation is encoded where charts are built, so it cannot be forgotten one 
 infra/
 ├── docker/
 │   ├── backend.Dockerfile      Multi-stage; Tesseract + OpenCV system deps
-│   ├── worker.Dockerfile       Backend image + ML extras
-│   └── caddy/Caddyfile         TLS termination, automatic certificates
-├── deploy/
-│   ├── deploy.sh               Pull tagged image, migrate, restart
-│   └── bootstrap-ec2.sh        One-time host setup, 2 GB swap
-└── aws/
-    ├── iam-policy.json         Least-privilege instance profile
-    ├── s3-bucket-policy.json   Public access blocked
-    └── cloudwatch-alarms.json
+│   └── worker.Dockerfile       Backend image + ML extras
+├── ops/
+│   ├── backup.sh               Postgres dump + receipt blobs, to LOCAL disk
+│   └── restore.sh              Restores into a scratch container and counts rows
+├── azure/                      The current deployment target (ADR-010)
+│   ├── terraform/              VM · VNet/NSG · Blob · Log Analytics · alerts · budget
+│   ├── docker-compose.prod.yml Caddy · api · worker · beat · redis
+│   ├── Caddyfile               TLS termination, automatic certificates
+│   ├── deploy.sh               rsync, build in place, migrate, restart
+│   ├── migrate-receipts.sh     One-off: S3 objects → Blob container
+│   ├── COST-SAFETY.md          Read before creating any resource
+│   └── RUNBOOK.md              Everything you do after it exists
+└── aws/                        The previous deployment, kept as the record
 ```
 
 Local `docker-compose.yml` runs api · worker · beat · postgres · redis · **minio**. MinIO means the
-full stack — including receipt upload — runs with no AWS account and no credentials. The `ObjectStore`
-port makes MinIO and S3 interchangeable.
+full stack — including receipt upload — runs with no cloud account and no credentials. The
+`ObjectStore` port makes MinIO, S3, and Azure Blob interchangeable, which is what let the deployment
+change cloud without touching a domain module.
 
-`bootstrap-ec2.sh` creates a 2 GB swap file. On a 1 GB instance this is what absorbs Prophet's fit-time
-memory spike instead of triggering the OOM killer.
+`azure/terraform/cloud-init.sh` creates a 2 GB swap file. On a 1 GB VM this is what absorbs Prophet's
+fit-time memory spike instead of triggering the OOM killer.
 
 ---
 
@@ -312,7 +350,7 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr
     access_token_ttl_seconds: int = 900
     refresh_token_ttl_days: int = 30
-    storage_backend: Literal["s3", "minio", "memory"]
+    storage_backend: Literal["s3", "minio", "azure_blob", "memory"]
     ocr_engine: Literal["tesseract", "fake"]
     price_provider: Literal["seed_catalog", "manual", "fake"]
     ocr_confidence_threshold: float = 0.75

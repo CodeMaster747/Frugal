@@ -39,6 +39,7 @@ export const FOOTER_COLUMNS: FooterColumn[] = [
     heading: "Learn to Use",
     links: [
       { label: "Quick start", href: "/guide#start" },
+      { label: "Get the Android app", href: "/download" },
       { label: "Importing transactions", href: "/guide#import" },
       { label: "Receipts & OCR", href: "/guide#receipts" },
       { label: "Reading your health score", href: "/guide#health" },

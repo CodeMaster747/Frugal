@@ -10,6 +10,11 @@ name: frugal
 x-backend-env: &backend-env
   ENVIRONMENT: local
   DATABASE_URL: postgresql+asyncpg://frugal:frugal@postgres:5432/frugal
+  # The second database (ADR-011). A different database, not a different
+  # schema: Settings refuses to boot if this resolves to the same endpoint
+  # as DATABASE_URL, because a separation that exists only in the names of
+  # two variables is not a separation.
+  SIGNALS_DATABASE_URL: postgresql+asyncpg://frugal:frugal@postgres:5432/frugal_signals
   REDIS_URL: redis://redis:6379/0
   JWT_SECRET: local-dev-secret-change-me-0123456789abcdef
   LOG_FORMAT: console
@@ -89,7 +94,7 @@ services:
       args:
         # Local image carries the dev toolchain, because `make test` and
         # `make lint` execute inside this container. Production builds omit it.
-        INSTALL_EXTRAS: "auth,dev,ocr,classify"
+        INSTALL_EXTRAS: "auth,dev,ocr,classify,azure"
         WITH_OCR: "true"
         # `make lint` and `make test` run inside this container, so installing a
         # tool here is routine. Production images strip pip -- it vendors
@@ -101,6 +106,7 @@ services:
       # Integration tests target a separate database so they never destroy
       # local development data.
       TEST_DATABASE_URL: postgresql+asyncpg://frugal:frugal@postgres:5432/frugal_test
+      TEST_SIGNALS_DATABASE_URL: postgresql+asyncpg://frugal:frugal@postgres:5432/frugal_signals_test
     ports: ["8000:8000"]
     volumes:
       # Whole directory, not individual files: a single-file bind mount breaks
@@ -120,7 +126,7 @@ services:
       context: ./backend
       dockerfile: ../infra/docker/worker.Dockerfile
       args:
-        INSTALL_EXTRAS: "auth,ocr,classify,forecast"
+        INSTALL_EXTRAS: "auth,ocr,classify,forecast,azure"
     environment: *backend-env
     volumes:
       - ./backend/app:/app/app:ro

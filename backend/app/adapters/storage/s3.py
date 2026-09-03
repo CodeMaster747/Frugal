@@ -43,6 +43,11 @@ class S3ObjectStore:
         # fall back to SigV2 on a custom endpoint.
         self._config = Config(signature_version="s3v4", retries={"max_attempts": 3})
 
+    @property
+    def upload_headers(self) -> dict[str, str]:
+        """None needed. S3 signs the content type into the URL itself."""
+        return {}
+
     @asynccontextmanager
     async def _client(self) -> Any:
         async with self._session.client(
@@ -65,17 +70,25 @@ class S3ObjectStore:
                 )
             )
 
-    async def presign_get(self, key: str, expires_in: int) -> str:
+    async def presign_get(self, key: str, expires_in: int, content_type: str | None = None) -> str:
         """Short-lived read URL.
 
         Generated per request and never stored: a persisted URL is a stored
         expiry bug, which is why the database holds the key alone.
+
+        `ResponseContentType` overrides whatever type the object carries. The
+        presigned PUT already pins the type at upload, so this is belt and
+        braces here -- but it is the *only* such guarantee on Azure, and
+        applying it on both keeps the two adapters behaviourally identical.
         """
+        params: dict[str, str] = {"Bucket": self._bucket, "Key": key}
+        if content_type:
+            params["ResponseContentType"] = content_type
         async with self._client() as client:
             return str(
                 await client.generate_presigned_url(
                     "get_object",
-                    Params={"Bucket": self._bucket, "Key": key},
+                    Params=params,
                     ExpiresIn=expires_in,
                 )
             )

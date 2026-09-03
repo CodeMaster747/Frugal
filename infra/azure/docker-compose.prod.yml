@@ -1,0 +1,225 @@
+# Production stack for the Azure VM.
+#
+# Five containers: Caddy, the API, one worker, beat, and Redis. Postgres is
+# absent on purpose -- it is on Neon, which is what keeps the VM free of
+# anything that cannot be rebuilt by destroying and re-applying. Neon is
+# unchanged by this migration: it was never an AWS service, so there was
+# nothing to move (ADR-010).
+#
+# Redis is co-hosted, capped, and unpersisted. It holds only regenerable state
+# (broker, cache, rate-limit counters), and the alternative was measured:
+# Upstash's free tier is 500k commands per *month*, while an idle Celery worker
+# BRPOPs its queues about once a second -- ~2.6M, so the broker stops answering
+# roughly a week into any month and the failure looks like tasks silently not
+# running.
+#
+# No bind mounts of source, no --reload, no dev toolchain in the images. Run
+# with an env file that never enters the repository:
+#
+#   docker compose -f docker-compose.prod.yml --env-file /opt/frugal/.env up -d
+
+x-backend-env: &backend-env
+  ENVIRONMENT: production
+  LOG_FORMAT: json
+  LOG_LEVEL: INFO
+  DATABASE_URL: ${DATABASE_URL:?set in /opt/frugal/.env}
+  DATABASE_DIRECT_URL: ${DATABASE_DIRECT_URL:?Neon pools connections; migrations need the direct endpoint}
+  # --- personalization signals (ADR-011) ---
+  # A second, genuinely separate database. Unset means the feature does
+  # not exist -- no routes, no task, no readiness entry -- so `:-` and
+  # not `:?`. Listed individually because this file enumerates: an
+  # unlisted variable silently never reaches the container, which looks
+  # like a broken feature rather than a config gap.
+  SIGNALS_DATABASE_URL: ${SIGNALS_DATABASE_URL:-}
+  SIGNALS_DATABASE_DIRECT_URL: ${SIGNALS_DATABASE_DIRECT_URL:-}
+  # --- crowdsourced price graph and points (ADR-013) ---
+  MIN_CONTRIBUTORS_FOR_DISPLAY: ${MIN_CONTRIBUTORS_FOR_DISPLAY:-2}
+  # Never in the database, so a dump alone links no contribution to a
+  # person. Falls back to JWT_SECRET when unset.
+  CONTRIBUTION_PEPPER: ${CONTRIBUTION_PEPPER:-}
+  POINTS_AWARDS_PER_USER_DAILY_CAP: ${POINTS_AWARDS_PER_USER_DAILY_CAP:-60}
+
+  # --- scraper (ADR-012) ---
+  # Empty means this deployment makes no outbound request at all. It can
+  # only turn OFF a host the code already knows how to read; it cannot
+  # turn on one that has no rule.
+  SCRAPER_ENABLED_HOSTS: ${SCRAPER_ENABLED_HOSTS:-}
+  REDIS_URL: ${REDIS_URL:?set in /opt/frugal/.env}
+  JWT_SECRET: ${JWT_SECRET:?set in /opt/frugal/.env}
+
+  # --- object storage -------------------------------------------------------
+  # `azure_blob`, not `s3`. The two are different adapters behind one port
+  # because Azure is not S3-compatible -- different auth, different signing,
+  # and an upload header the browser must send (ADR-010).
+  STORAGE_BACKEND: azure_blob
+  AZURE_STORAGE_ACCOUNT: ${AZURE_STORAGE_ACCOUNT:?from terraform output storage_account}
+  AZURE_BLOB_CONTAINER: ${AZURE_BLOB_CONTAINER:-receipts}
+  # No AZURE_STORAGE_KEY. The adapter authenticates as the VM's system-assigned
+  # managed identity over IMDS and signs SAS URLs with a 24-hour user
+  # delegation key, so there is no long-lived secret on this machine to leak.
+  # The storage account has shared keys disabled outright, so there is not even
+  # a key to accidentally set here.
+  CORS_ORIGINS: ${CORS_ORIGINS:?the public URL serving the frontend}
+
+  # --- offer search (M13) ---------------------------------------------------
+  # Every one of these has a default, so a deployment that sets none of them
+  # runs on the simulator and is *incapable* of spending money. The key is the
+  # only switch that matters: without it the factory returns the fake whatever
+  # OFFER_SEARCH_PROVIDER says (ADR-008).
+  #
+  # These are listed individually because this file enumerates rather than
+  # passing the env file through -- an unlisted variable silently never reaches
+  # the container, which is a failure that looks like a broken feature.
+  OFFER_SEARCH_PROVIDER: ${OFFER_SEARCH_PROVIDER:-simulated}
+  SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+  SERPAPI_MONTHLY_CAP: ${SERPAPI_MONTHLY_CAP:-200}
+  SERPAPI_DAILY_CAP: ${SERPAPI_DAILY_CAP:-10}
+  SERPAPI_PER_USER_DAILY_CAP: ${SERPAPI_PER_USER_DAILY_CAP:-2}
+  OFFER_CACHE_TTL_HOURS: ${OFFER_CACHE_TTL_HOURS:-24}
+  SUPPORT_CONTACT: ${SUPPORT_CONTACT:-the developer}
+
+  # --- sms ingestion (M12) --------------------------------------------------
+  SMS_CONFIDENCE_THRESHOLD: ${SMS_CONFIDENCE_THRESHOLD:-0.75}
+  SMS_RAW_BODY_RETENTION_DAYS: ${SMS_RAW_BODY_RETENTION_DAYS:-30}
+
+# Container stdout goes to the systemd journal, which the Azure Monitor agent
+# collects into Log Analytics. This is the change that makes application logs
+# actually reachable from the alerts: the AWS deployment used the json-file
+# driver while its CloudWatch agent tailed a file nothing wrote, so no
+# application log ever left the box.
+#
+# The journal's own ceiling is set in cloud-init.sh (512 MB, 7 days), which
+# replaces the per-container max-size caps json-file needed.
+x-journald: &journald
+  driver: journald
+
+services:
+  # Broker, aggregate cache, and rate-limit counters. Nothing here survives a
+  # restart by design, and nothing needs to.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # `save ""` disables RDB snapshots. Not just to avoid the disk: BGSAVE
+    # forks, and a fork on a 1 GB VM can briefly double Redis' resident size at
+    # exactly the moment a Prophet fit is already holding ~450 MB.
+    #
+    # 64 MB with LRU eviction makes the cap a bounded, self-correcting cost
+    # instead of a slow climb into the swap file. Evicting a cached aggregate
+    # costs one recomputation; evicting a queued task would lose work, but the
+    # queue is only ever a handful of keys at this scale.
+    command: >
+      redis-server --save "" --appendonly no
+      --maxmemory 64mb --maxmemory-policy allkeys-lru
+    # Not published to the host. Only the compose network reaches it, which is
+    # what makes running without a password acceptable here.
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *journald
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The vector basemap (ADR-014). Read-only, and mounted rather than baked
+      # into the image: it is rebuilt on a different cadence from the code and
+      # `deploy.sh` does not ship it.
+      - /opt/frugal/basemap:/opt/frugal/basemap:ro
+      # Certificates and ACME account keys. Losing this volume means
+      # re-requesting certificates on every restart, which hits Let's Encrypt
+      # rate limits after five attempts in a week.
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+      # The Render origin, for the basemap's CORS headers. Without it the
+      # archive fails at the preflight and the map falls back to a plain
+      # background -- which looks like a missing file rather than a missing
+      # header.
+      FRONTEND_ORIGIN: ${FRONTEND_URL:-http://localhost:3000}
+    depends_on:
+      api: {condition: service_healthy}
+    logging: *journald
+
+  api:
+    image: ${IMAGE_REPO:-frugal}/api:${IMAGE_TAG:-latest}
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/backend.Dockerfile
+      args:
+        # `azure` is new here and is what pulls azure-storage-blob and
+        # azure-identity. Without it the container starts, reads
+        # STORAGE_BACKEND=azure_blob, and fails on the first upload with an
+        # ImportError -- which reads as a broken deploy rather than a missing
+        # extra.
+        #
+        # Still no `dev` extra: pytest, ruff, and mypy have no business in a
+        # production image, and each one is attack surface plus megabytes.
+        INSTALL_EXTRAS: "auth,ocr,classify,azure"
+        WITH_OCR: "true"
+    restart: unless-stopped
+    environment: *backend-env
+    # Not published to the host. Only Caddy reaches the API, over the compose
+    # network, so there is no way to bypass TLS by hitting port 8000 directly.
+    expose:
+      - "8000"
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8000
+      --workers 2 --proxy-headers --forwarded-allow-ips='*'
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      redis: {condition: service_healthy}
+    logging: *journald
+
+  worker:
+    image: ${IMAGE_REPO:-frugal}/worker:${IMAGE_TAG:-latest}
+    build:
+      context: ../../backend
+      dockerfile: ../infra/docker/worker.Dockerfile
+      args:
+        INSTALL_EXTRAS: "auth,ocr,classify,forecast,azure"
+    restart: unless-stopped
+    environment: *backend-env
+    # Concurrency 1, as in development: measured footprint is ~450 MB during a
+    # Prophet fit or an OpenCV pipeline, so a second worker on a 1 GB VM is an
+    # out-of-memory kill rather than throughput (ADR-006).
+    command: >
+      celery -A app.workers.celery_app.celery_app worker
+      --loglevel=info --concurrency=1 --max-tasks-per-child=50
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 45s
+    depends_on:
+      redis: {condition: service_healthy}
+    logging: *journald
+
+  beat:
+    image: ${IMAGE_REPO:-frugal}/api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment: *backend-env
+    command: >
+      celery -A app.workers.celery_app.celery_app beat --loglevel=info
+      --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      redis: {condition: service_healthy}
+    logging: *journald
+
+volumes:
+  caddy_data:
+  caddy_config:

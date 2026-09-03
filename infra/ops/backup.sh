@@ -4,13 +4,14 @@
 #
 #   ./backup.sh [destination-directory]
 #
-# Destination defaults to ./backups. **Local by design, not S3.**
+# Destination defaults to ./backups. **Local by design, not object storage.**
 #
-# The obvious place for a backup is the S3 bucket the application already has.
-# That is wrong here: the AWS account is on the Free Plan and will pause when
-# its credits or six months run out, and a backup stored inside the account that
-# stopped is not a backup. The two things worth keeping -- the database and the
-# receipt images -- must land somewhere AWS cannot switch off.
+# The obvious place for a backup is the blob container the application already
+# has. That is wrong here, and the reason survived the move off AWS unchanged:
+# the Azure for Students subscription is disabled when its credit or its twelve
+# months run out, and a backup stored inside the subscription that stopped is
+# not a backup. The two things worth keeping -- the database and the receipt
+# images -- must land somewhere the cloud provider cannot switch off.
 #
 # What is *not* backed up, deliberately:
 #   * Redis (Upstash) holds only caches, rate-limit counters, and the Celery
@@ -57,17 +58,42 @@ docker run --rm -i \
 printf '     %s\n' "$(du -h "${RUN}/database.dump" | cut -f1) written"
 
 # --- receipts ---------------------------------------------------------------
-# The only user data that lives in AWS. Everything else about a receipt -- the
-# extracted fields, the confidence scores, the transaction it became -- is in
-# Postgres and is covered by the dump above. This is the image itself.
+# The only user data that lives in the cloud provider. Everything else about a
+# receipt -- the extracted fields, the confidence scores, the transaction it
+# became -- is in Postgres and is covered by the dump above. This is the image
+# itself.
+#
+# Both backends are handled because the deployment has both: Azure Blob is
+# where receipts live now (ADR-010), and S3 stays supported so this script can
+# still take a final backup of the AWS bucket before it is destroyed, and so a
+# deployment on R2 or MinIO is not left without one.
 
 say "2/3  Receipt images"
 
-if [[ -n "${S3_BUCKET:-}" ]] && command -v aws >/dev/null 2>&1; then
+RECEIPTS_SOURCE="(not backed up)"
+
+if [[ -n "${AZURE_STORAGE_ACCOUNT:-}" ]] && command -v az >/dev/null 2>&1; then
+  # --auth-mode login: the storage account has shared keys disabled, so this
+  # authenticates as your Entra ID identity. It needs the Storage Blob Data
+  # Contributor role on the account -- being subscription Owner is not enough,
+  # because that is a control-plane role and this is a data-plane read.
+  mkdir -p "${RUN}/receipts"
+  az storage blob download-batch \
+    --auth-mode login \
+    --account-name "${AZURE_STORAGE_ACCOUNT}" \
+    --source "${AZURE_BLOB_CONTAINER:-receipts}" \
+    --destination "${RUN}/receipts" \
+    --no-progress \
+    --output none
+  RECEIPTS_SOURCE="azure://${AZURE_STORAGE_ACCOUNT}/${AZURE_BLOB_CONTAINER:-receipts}"
+  printf '     %s objects\n' "$(find "${RUN}/receipts" -type f 2>/dev/null | wc -l | tr -d ' ')"
+elif [[ -n "${S3_BUCKET:-}" ]] && command -v aws >/dev/null 2>&1; then
   aws s3 sync "s3://${S3_BUCKET}" "${RUN}/receipts/" --only-show-errors
+  RECEIPTS_SOURCE="s3://${S3_BUCKET}"
   printf '     %s objects\n' "$(find "${RUN}/receipts" -type f 2>/dev/null | wc -l | tr -d ' ')"
 else
-  echo "     skipped: set S3_BUCKET and install the AWS CLI to include receipt images"
+  echo "     skipped: set AZURE_STORAGE_ACCOUNT (with the Azure CLI) or S3_BUCKET"
+  echo "              (with the AWS CLI) to include receipt images"
 fi
 
 # --- manifest ---------------------------------------------------------------
@@ -88,7 +114,7 @@ cat >"${RUN}/manifest.txt" <<EOF
 taken_at:        ${STAMP}
 alembic_version: ${MIGRATION}
 database:        ${REDACTED_URL}
-s3_bucket:       ${S3_BUCKET:-(not backed up)}
+receipts:        ${RECEIPTS_SOURCE}
 restore_with:    infra/ops/restore.sh ${RUN}
 EOF
 

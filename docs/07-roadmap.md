@@ -170,7 +170,7 @@ categorisation can proceed in parallel rather than blocking.
 
 **Deliverables**
 - `receipts`, `receipt_fields`, `receipt_line_items`, `jobs`
-- Presigned S3/MinIO upload — bytes never transit the API
+- Presigned object-storage upload (MinIO locally) — bytes never transit the API
 - OpenCV pipeline: perspective correction → deskew → denoise → adaptive threshold
 - Tesseract via `image_to_data` for per-token confidence
 - Field extraction: merchant, date, total, tax, line items, each with confidence and `bbox`
@@ -451,6 +451,8 @@ categorisation can proceed in parallel rather than blocking.
 
 ## 4. v1.1 milestones
 
+M9–M13. M12 and M13 landed after this document was last revised; ADR-010 records that.
+
 ### M9 — Market intelligence
 Wishlist and interested products · price history from `price_points` · lowest-recorded-price tracking ·
 drop detection and alerts · **Seller Reliability Score** from observable signals only, with the rubric
@@ -632,6 +634,25 @@ and [ACCOUNT-MIGRATION](../infra/aws/ACCOUNT-MIGRATION.md).
 table intact); load test **passed** but against the wrong hardware (below); HTTPS and alarm
 verification **pending the deploy**, with the procedure written.
 
+> **Superseded target, 2026-08-22.** The stack above was built for AWS and is
+> unchanged in [`infra/aws/`](../infra/aws/). The deployment target has since
+> moved to Azure ([ADR-010](adr/010-azure-migration.md)) — a *term* decision,
+> not a cost one: the AWS Free Plan runs six months and Azure for Students runs
+> twelve, renewable while enrolled. The equivalent Azure stack is in
+> [`infra/azure/`](../infra/azure/), and the ports made it a small change:
+> one new `ObjectStore` adapter, one config value, and one upload header.
+> Neon and Render did not move, so no user data migrated.
+>
+> One thing the rebuild found, which is why it belongs in this section: **the
+> CloudWatch agent tailed `/var/log/frugal/app.log`, and nothing ever wrote
+> that file.** The containers logged to Docker's `json-file` driver, so no
+> application log ever reached CloudWatch and the `frugal-5xx` metric filter
+> matched nothing for the life of the configuration. It was an alarm that could
+> not fire, and it looked correct in Terraform, in the agent config, and in the
+> console. The Azure stack routes container stdout to journald, which the
+> monitor agent genuinely collects — and RUNBOOK §4.2 exists to make somebody
+> prove that rather than assume it a second time.
+
 *What this milestone found:*
 
 - **CI had never scanned the backend for vulnerabilities.** Trivy's filesystem scan reads
@@ -666,6 +687,160 @@ verification **pending the deploy**, with the procedure written.
   deployment.
 - **A routine backup was one `git add -A` from committing everyone's finances.** `backups/` was not
   in `.gitignore` and the script defaults to `./backups`.
+
+---
+
+### M12 — SMS ingestion
+
+**Goal.** Read the bank alerts a user already receives, and turn the ones that are transactions into
+ledger entries — without becoming a product that reads people's messages.
+
+**Decision.** ADR-009: *filter on the device, parse on the server, one implementation of each.* The
+DLT sender allowlist and transactional-keyword gate live in `app/modules/sms/parser/senders.py` and
+are **generated** into Kotlin by `backend/scripts/generate_sender_filter.py`. A CI job regenerates
+and diffs; drift is a build failure, because a hand-mirrored allowlist is a privacy boundary held by
+somebody remembering.
+
+**Shipped.** Three intake paths — paste, share sheet, and live capture on the `smsreader` build. A
+pure parser (no session, no models, held by the `the-sms-parser-is-pure` contract) over nine
+templates: seven issuers plus a UPI and a card generic. `sms_messages` + `account_identifiers`
+(migration 0017). Auto-commit requires **two** independent confirmations: confidence above
+`SMS_CONFIDENCE_THRESHOLD` *and* a user-confirmed account-handle mapping.
+
+**Exit criteria — all met.** Every registry template has a fixture, or `test_every_template_has_a_fixture`
+fails. `raw_body` is dropped on commit or dismiss and swept nightly after
+`SMS_RAW_BODY_RETENTION_DAYS`. `body_redacted` strips the phone number, the OTP, and the running
+balance — the most revealing figure in a bank message, and one no engine reads.
+
+**Found while building.**
+- **A pasted message has no sender, and the sender is the privacy boundary.** Ordering candidates
+  sender-first meant a paste matched *every* template. Capping a senderless parse at
+  `RAIL_UNKNOWN_SENDER` (0.65) puts it permanently below the auto-commit threshold, so it is always
+  reviewed rather than sometimes booked.
+- **A card tail and an account tail are different kinds and look identical.** Resolving one against
+  the other would book a transaction to the wrong account, silently. `resolve_account` never
+  guesses and never creates.
+
+### M13 — Offer search
+
+**Goal.** Answer "is this cheaper somewhere else?" for a product the user is about to buy.
+
+**Decision.** ADR-008: *metered dependencies pay nothing, or they stop.* Every survivor of the
+August-2026 search-API survey was closed, withdrawn, retired, or switched off except SerpAPI's
+`google_shopping`. Five conditions: hard-stop rather than auto-bill, no card on file, the gate lives
+**inside the adapter** above the HTTP client, our caps sit below the provider's, and exhaustion
+degrades and says so.
+
+**Shipped.** `app/core/quota.py` — a Postgres ledger, not Redis, because a quota counter is the one
+piece of state whose loss costs money. One atomic
+`INSERT … ON CONFLICT … WHERE used < cap RETURNING used`; no row returned means exhausted. Reserve
+before the call, no refund on failure. `offer_snapshots` caches results for
+`OFFER_CACHE_TTL_HOURS`, again in Postgres, because an evicted key costs *quota*. Migrations 0018
+and 0019.
+
+**Exit criteria — all met.** The default provider is `simulated`, so a deployment with no key is
+*incapable* of spending money. `test_quota_is_enforced_inside_the_adapter` scans the source, so the
+gate cannot drift up into a caller.
+
+**Found while building.**
+- **A timeout still spends quota.** The client timeout was raised from 8 s to 30 s once it was clear
+  that abandoning a request does not refund the reservation.
+- **A cached simulated result reported `source="cache"`**, and the "these are not real listings"
+  caveat was keyed off `source`. Two tests searching the same product left invented prices on screen
+  labelled as though they were real listings about named retailers. The caveat is now derived from
+  what *produced* the offers.
+
+
+---
+
+## 4b. v1.2 — the price graph
+
+### M14 — Rectification and foundations
+
+**Goal.** Fix what was broken before adding twenty tables on top of it.
+
+**Found while building — the serious one.** **The models and the schema had
+disagreed about every cascading foreign key since M10.** `TenantMixin` declared
+a bare `user_id`; migration 0016 added `ON DELETE CASCADE` to nineteen tables in
+raw SQL, and migration 0015 indexed nineteen foreign-key child columns the
+models never mentioned. `alembic revision --autogenerate` would therefore have
+emitted a migration **dropping all thirty-eight** — reintroducing the exact bug
+M10 found, on the one code path that carries a legal obligation.
+
+Nothing could see it, because nothing ran `alembic check`. The cascade now lives
+on the mixin, so a new tenant table gets it by construction, and `alembic check`
+runs in CI against both migration trees.
+
+**Also found.** `alembic/env.py` was missing the `sms` and `quota` model
+imports, so four M12/M13 tables were invisible to autogenerate for the same
+reason. `schema.d.ts` had been a field behind since ADR-010 while
+`docs/06-project-structure.md` claimed CI failed on a diff — it did not, and now
+does. Four design-token classes resolved to nothing in three files, which
+Tailwind v4 cannot report because an unknown utility simply emits no CSS.
+
+**Also.** The native SMS bridge had existed on both sides since M12 with nothing
+connecting them: `SmsReceiverPlugin` in Kotlin, `ingestBatch()` in TypeScript,
+and no caller. Live capture captured, buffered, and stopped.
+
+### M15 — The personalization database (ADR-011)
+
+**Goal.** Hold SMS-derived purchase signals somewhere the ledger cannot reach.
+
+**Shipped.** A second Postgres: own URL, own engine, own Alembic tree, own
+declarative base, `subject_id` rather than `user_id`. `Settings` refuses to boot
+if the two URLs resolve to the same database. Erasure crosses the boundary by
+outbox, because no transaction spans two databases.
+
+**Found while building.** The erasure sweep must commit the *signals* database
+first. There is no spanning transaction, so the ordering is the correctness
+argument: a crash between commits re-runs the sweep and deleting zero rows twice
+is free, while the opposite order marks the obligation paid and leaves the data.
+
+### M16 — The verified price graph and points (ADR-013)
+
+**Goal.** Turn committed receipts into prices other people can use.
+
+**Found while building.** **The promotion rule skipped every line on every
+receipt.** It required a unit price or a stated quantity, and the extractor
+produced neither — receipts state a quantity only sometimes. Nothing reached the
+graph until an integration test caught it. An absent quantity is now read as one
+unit, documented as an assumption, and absorbed by the median across
+contributors.
+
+**Also.** Item normalisation folded `amul taaza` into the brand `amul`, which
+made Amul Taaza and Amul Gold one product at one price. A brand alias may only
+collapse spelling; a variant belongs in the head noun. And `Decimal.normalize()`
+turned 500 into `5E+2`, which went straight into the blocking key — so `500ml`
+and `5E+2ml` were two products.
+
+### M17 — Community contributions
+
+**Goal.** Let local shops onto the map, where there is no bill to scan.
+
+**Shipped.** Reports, verification weighted by trust, comments, one-vote-per-user
+by unique constraint, and a derived trust score. No moderation queue and no admin
+role: the defence is structural.
+
+The property worth stating: an author's own trust counts for **half** towards
+promotion, so even a maximally trusted author reaches 0.475 against a 0.600
+threshold. **At least one other person must always agree.**
+
+### M18 — The map, and a narrow scraper (ADR-012)
+
+**Goal.** Open the app on the thing it does, and stop depending on eight
+searches a day.
+
+**Found while building.** MapLibre's stylesheet was never imported, so
+`.maplibregl-marker` had no `position: absolute` and every marker fell into
+static flow — stacking below the map, growing the container's scroll height to
+1242px against an 800px box, and pushing the header 442px above the fold the
+first time a click moved focus. Everything still *rendered*, which is what made
+it easy to miss. `overflow-hidden` did not save it either: it hides a scrollbar
+but still creates a scroll container. `overflow-clip` creates none.
+
+**Also.** The offer chain's first draft dropped the "not real listings" caveat
+whenever the configured provider *was* the simulator — which is the default, and
+therefore the common case.
 
 ---
 

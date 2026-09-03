@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import DateTime, Index, SmallInteger, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,7 +31,12 @@ class JobStatus(StrEnum):
 class Job(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "jobs"
 
-    user_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    # Nullable: a scheduled sweep belongs to the deployment, not to a person.
+    # Cascading anyway, so deleting an account takes its job rows with it --
+    # added by migration 0016 and declared here so `alembic check` can see it.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     task_name: Mapped[str] = mapped_column(String(120), nullable=False)
     celery_task_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=JobStatus.QUEUED.value)

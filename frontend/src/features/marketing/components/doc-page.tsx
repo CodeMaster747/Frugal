@@ -26,7 +26,7 @@ export function DocPage({
       <div className="max-w-3xl">
         <header className="space-y-2">
           <p className="type-eyebrow text-ink-muted">{eyebrow}</p>
-          <h1 className="type-display text-balance">{title}</h1>
+          <h1 className="type-editorial text-balance">{title}</h1>
           <p className="max-w-prose type-body text-ink-secondary">{intro}</p>
         </header>
 

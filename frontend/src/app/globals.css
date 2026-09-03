@@ -28,7 +28,11 @@
   /* 8% rather than 10%: pure black at 10% on a near-white surface reads heavier
    * than the same figure does inverted on the dark surface. */
   --hairline: rgb(11 11 11 / 0.08);
-  --ring: #2a78d6;
+  /* The focus ring is chrome, so it reads from the brand rather than from the
+   * income series. `outline-offset: 2px` in the base layer puts the ring on the
+   * page, never on the control it surrounds, so the ratio that matters for
+   * WCAG 1.4.11 is ring-against-page: 11.45 light, 8.56 dark. */
+  --ring: var(--brand);
 
   /* --- categorical chart slots: fixed order, never cycled --- */
   --series-1: #2a78d6; /* blue   — income, projected balance */
@@ -54,6 +58,42 @@
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
   --delta-up: #006300;
+
+  /* --- brand: the fourth reservation, and chrome only ---
+   *
+   * Surfaces, series and status each own a slice of the palette; this is the
+   * fourth. It identifies the product -- mark, primary action, links, active
+   * nav, focus ring -- and never encodes a value. Nothing here may become a
+   * chart series.
+   *
+   * Adding it also settles an existing inconsistency rather than creating one:
+   * the active nav rail, the unread-insight border and the selected map pin all
+   * painted chrome with `--series-1`, against the rule stated in button.tsx that
+   * the saturated colours belong to data and status. Those three now read from
+   * here.
+   *
+   * The hue is forced. Blue, orange, aqua, yellow, green, red and salmon are all
+   * spoken for, which leaves violet -- but hue alone is not enough. Measured
+   * under Machado-Oliveira against all eight palette colours, a violet at the
+   * chart slots' own lightness collapses onto `--series-1`: worst-case dE 4.4 at
+   * #a975e0 and 5.4 at #8c4ac8, both under the floor of 6. A protanope cannot
+   * tell those from income.
+   *
+   * So the brand separates by LIGHTNESS, not by hue, and lives at the ends of
+   * its ramp where the chart palette has nothing: dE 31.6 for the light step and
+   * 17.2 for the dark one. That is what makes it structurally impossible to
+   * mistake for a series, and it is the same reservation logic the status
+   * colours already use.
+   *
+   * Verified: white on brand 12.07, brand on page 11.45, brand on wash 10.89,
+   * ink-secondary on wash 7.17. */
+  --brand: #4c1e73;
+  --brand-strong: #401563;
+  /* A tint of the brand for the one focal block on a screen. Sits 1.05 off the
+   * page -- the same order of separation as `page` -> `surface` (1.03), so it
+   * reads as a surface step rather than a coloured panel. */
+  --brand-wash: #f6f2f7;
+  --brand-contrast: #ffffff;
 }
 
 .dark {
@@ -70,7 +110,7 @@
   --gridline: #26262b;
   --baseline: #33333a;
   --hairline: rgb(255 255 255 / 0.1);
-  --ring: #3987e5;
+  --ring: var(--brand);
 
   --series-1: #3987e5;
   --series-2: #d95926;
@@ -82,6 +122,15 @@
 
   /* Status steps are mode-invariant: all four clear 3:1 on the dark surface. */
   --delta-up: #0ca30c;
+
+  /* The other end of the same ramp. Dark takes the light step and light takes
+   * the dark one, for the same reason the surfaces invert: the brand has to sit
+   * furthest from the chart palette in lightness on whichever ground it is on.
+   * Verified: ink on brand 8.79, brand on page 8.56, brand on wash 7.73. */
+  --brand: #c39dee;
+  --brand-strong: #dbc6f7;
+  --brand-wash: #1e1826;
+  --brand-contrast: #0b0b0b;
 }
 
 @theme inline {
@@ -96,6 +145,11 @@
   --color-hairline: var(--hairline);
   --color-ring: var(--ring);
 
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-wash: var(--brand-wash);
+  --color-brand-contrast: var(--brand-contrast);
+
   --color-series-1: var(--series-1);
   --color-series-2: var(--series-2);
   --color-series-3: var(--series-3);
@@ -107,9 +161,15 @@
   --color-critical: var(--status-critical);
   --color-delta-up: var(--delta-up);
 
-  /* System sans throughout, including hero figures. No display or serif face. */
-  --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  /* Three faces, each with one job. The fallback stacks matter: PNG/PDF export
+   * and the first paint before the webfont lands both render the fallback, so
+   * each is metrically close to the face it stands in for. */
+  --font-sans: var(--font-instrument-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  /* The display serif is deliberately not a theme font family: it carries a
+   * weight and a tracking of its own, so it ships as the `type-editorial` roles
+   * below rather than as a family utility you could compose onto any role. */
 
   /* Four radii, and nothing else. `--radius-*` is a Tailwind v4 namespace, so
    * these emit `rounded-control` / `rounded-card` / `rounded-inner` /
@@ -164,6 +224,46 @@
   font-weight: 600;
 }
 
+/* The editorial pair: the same two sizes as `type-display` and `type-hero`, set
+ * in the display serif. Marketing and the cold-start welcome only -- the
+ * application proper stays in one grotesque.
+ *
+ * These are separate roles rather than a `font-display` class composed on top of
+ * `type-display`, for two reasons.
+ *
+ * The first is the rule this scale is built on: size, weight, tracking and
+ * leading travel together in one class. A serif at these sizes does not want the
+ * grotesque's numbers -- it needs less negative tracking, because the serif is
+ * drawn with more fit, and it needs weight 400, because Instrument Serif ships
+ * exactly one weight.
+ *
+ * The second is that composition does not actually work here. Both classes are
+ * one class of specificity, so the cascade is decided by emission order, and
+ * Tailwind emits `type-*` after `font-*`: `type-display`'s 600 would win and the
+ * browser would synthesise a faux bold, which on a high-contrast serif reads as
+ * a smeared outline rather than a heavier face.
+ *
+ * The roles they mirror stay untouched, and that is deliberate: `type-display`
+ * and `type-hero` are used on figures as well as headings (`tabular
+ * type-display` in advisor, contributions and the marketing visuals), and the
+ * serif has no `tnum`. Folding it into those roles would silently un-align every
+ * figure that uses them. */
+@utility type-editorial {
+  font-family: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
+  font-size: 2rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-weight: 400;
+}
+
+@utility type-editorial-hero {
+  font-family: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
+  font-size: 3rem;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  font-weight: 400;
+}
+
 @utility type-display {
   font-size: 2rem;
   line-height: 1.15;
@@ -209,9 +309,11 @@
     color: var(--ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
-    /* A hair of negative tracking across everything. Geist, like most grotesques,
-     * is spaced for smaller optical sizes than a screen UI runs at; without this
-     * the copy reads very slightly loose. Headings tighten further on top. */
+    /* A hair of negative tracking across everything. Instrument Sans, like most
+     * grotesques, is spaced for smaller optical sizes than a screen UI runs at;
+     * without this the copy reads very slightly loose. Headings tighten further
+     * on top. Carried over unchanged from Geist -- the two faces are close
+     * enough in fit that the same correction applies. */
     letter-spacing: -0.011em;
   }
 
@@ -239,5 +341,60 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+  }
+}
+
+/* --- map pins -------------------------------------------------------------
+ *
+ * MapLibre markers are DOM nodes it positions absolutely, so they sit outside
+ * any React tree and cannot take Tailwind classes generated by the compiler --
+ * the class strings never appear in a source file for it to scan. Written as
+ * real CSS against the same tokens for that reason, not as an escape from the
+ * design system.
+ *
+ * The pin is a button. It has to be: it is the primary control on the landing
+ * screen, and a div with a click handler is unreachable by keyboard.
+ */
+.price-pin {
+  display: grid;
+  place-items: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: transform var(--default-transition-duration) var(--ease-standard);
+}
+
+.price-pin:hover {
+  transform: scale(1.1);
+}
+
+.price-pin:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+.price-pin[data-selected="true"] {
+  /* Chrome, not data: a selected pin is a selection state. White clears 12.07 on
+   * the light brand step and the dark step takes ink, so the label stays legible
+   * over any basemap in either mode. */
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: var(--color-brand-contrast);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .price-pin {
+    transition: none;
+  }
+  .price-pin:hover {
+    transform: none;
   }
 }

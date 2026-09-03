@@ -23,6 +23,7 @@ class ErrorCode(StrEnum):
     RATE_LIMITED = "RATE_LIMITED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+    SERVICE_PAUSED = "SERVICE_PAUSED"
 
 
 class ErrorDetail(BaseModel):
@@ -37,6 +38,16 @@ class ErrorBody(BaseModel):
     details: list[ErrorDetail] = Field(default_factory=list)
     request_id: str | None = None
     docs_url: str | None = None
+
+    #: Why the answer is absent, in prose, when refusing *is* the answer.
+    #:
+    #: Distinct from `details`, which is field-level ("amount: must be
+    #: positive"). A caveat is about the response as a whole: an engine that
+    #: declined for want of history, or a metered dependency that has stopped.
+    #: The frontend has read `error.caveats` since M7 -- see
+    #: `frontend/src/lib/api/client.ts` -- but nothing ever sent it, so the
+    #: forecast page's declined panel has been rendering an empty reason list.
+    caveats: list[str] = Field(default_factory=list)
 
 
 class ErrorResponse(BaseModel):
@@ -60,11 +71,13 @@ class AppError(Exception):
         message: str,
         *,
         details: list[ErrorDetail] | None = None,
+        caveats: list[str] | None = None,
         headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.details = details or []
+        self.caveats = caveats or []
         self.headers = headers or {}
 
     def to_response(self, request_id: str | None = None) -> ErrorResponse:
@@ -73,6 +86,7 @@ class AppError(Exception):
                 code=self.code,
                 message=self.message,
                 details=self.details,
+                caveats=self.caveats,
                 request_id=request_id,
                 docs_url=f"https://docs.frugal.app/errors/{self.code.value}",
             )
@@ -156,5 +170,39 @@ class InsufficientDataError(AppError):
     code = ErrorCode.INSUFFICIENT_DATA
 
     def __init__(self, message: str, *, caveats: list[str] | None = None, **kw: Any) -> None:
-        details = [ErrorDetail(issue=c) for c in (caveats or [])]
-        super().__init__(message, details=details, **kw)
+        caveats = caveats or []
+        # `details` is populated too, and stays populated. Caveats lived there
+        # alone until the envelope grew a field for them, and a client that
+        # learned to read them from `details` should not break on the day the
+        # right field appears.
+        super().__init__(
+            message,
+            details=[ErrorDetail(issue=c) for c in caveats],
+            caveats=caveats,
+            **kw,
+        )
+
+
+class ExternalServicePausedError(AppError):
+    """A metered dependency has spent its free allowance and stopped.
+
+    Distinct from INSUFFICIENT_DATA, which is about the user's own history
+    being too thin. This is about *us*: a capability the product paid nothing
+    for is unavailable until the period rolls over, and no amount of user data
+    changes that. The distinction matters because the remedies differ -- one
+    says "come back when you have more transactions", the other says "contact
+    the developer".
+
+    Prefer degrading to a fallback over raising this. Reserve it for endpoints
+    whose entire answer depends on the paused service; see
+    `docs/adr/008-external-quota-and-degradation.md`.
+    """
+
+    status_code = 503
+    code = ErrorCode.SERVICE_PAUSED
+
+    def __init__(self, service: str, *, contact: str | None = None, **kw: Any) -> None:
+        caveats = [f"{service} is paused: its free allowance for this period is used up."]
+        if contact:
+            caveats.append(f"Please contact the developer at {contact} if you need this restored.")
+        super().__init__(f"{service} is temporarily unavailable", caveats=caveats, **kw)

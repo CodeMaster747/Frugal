@@ -29,14 +29,14 @@ graph TB
     Frugal["<b>Frugal</b><br/>Financial decision platform<br/><i>Tracks, scores, forecasts, advises</i>"]
 
     Google["Google OAuth<br/><i>Federated sign-in</i>"]
-    S3["AWS S3<br/><i>Receipt & export storage</i>"]
-    CW["AWS CloudWatch<br/><i>Logs, metrics, alarms</i>"]
+    S3["Azure Blob Storage<br/><i>Receipt & export storage</i>"]
+    CW["Azure Monitor<br/><i>Logs, metrics, alerts</i>"]
     Email["Email provider<br/><i>Alerts & digests (M10)</i>"]
     Prices["Price sources<br/><i>Seeded catalogue in v1;<br/>licensed API later</i>"]
 
     User -->|"Manages finances,<br/>asks purchase questions"| Frugal
     Frugal -->|"Authenticates"| Google
-    Frugal -->|"Stores receipts<br/>(presigned)"| S3
+    Frugal -->|"Stores receipts<br/>(SAS URL)"| S3
     Frugal -->|"Emits logs & metrics"| CW
     Frugal -.->|"Sends alerts"| Email
     Frugal -->|"Retrieves prices<br/>via PriceProvider port"| Prices
@@ -54,28 +54,28 @@ it with a seeded catalogue, and the system cannot tell the difference.
 
 ```mermaid
 graph TB
-    subgraph Vercel
+    subgraph Render
         FE["<b>Web App</b><br/>Next.js 16 · TypeScript<br/>App Router · RSC<br/>TanStack Query · Recharts"]
     end
 
-    subgraph EC2["AWS EC2 t3.micro — 1 GB"]
+    subgraph VM["Azure VM Standard_B1s — 1 GB"]
         API["<b>API</b><br/>FastAPI · Python 3.11<br/>async · SQLAlchemy 2<br/><i>~250 MB</i>"]
         Worker["<b>Worker</b><br/>Celery · sync<br/>OCR · ML · Forecast<br/><i>~450 MB, 1 concurrency</i>"]
         Beat["<b>Scheduler</b><br/>Celery Beat<br/><i>~60 MB</i>"]
+        Redis[("<b>Redis</b><br/>Broker · cache · rate limit<br/><i>64 MB cap, unpersisted</i>")]
     end
 
     subgraph Managed["Managed services — free tier"]
         PG[("<b>Postgres 16</b><br/>Neon<br/>System of record")]
-        Redis[("<b>Redis</b><br/>Upstash<br/>Broker · cache · rate limit")]
     end
 
-    subgraph AWS["AWS"]
-        S3["<b>S3</b><br/>Private buckets<br/>Presigned access"]
-        CW["<b>CloudWatch</b><br/>Logs · metrics · alarms"]
+    subgraph Azure["Azure"]
+        S3["<b>Blob Storage</b><br/>Private container<br/>SAS access, no account keys"]
+        CW["<b>Log Analytics</b><br/>Logs · metrics · alerts"]
     end
 
     FE -->|"HTTPS / JSON<br/>Bearer + refresh cookie"| API
-    FE -->|"Direct upload<br/>(presigned PUT)"| S3
+    FE -->|"Direct upload<br/>(SAS PUT + x-ms-blob-type)"| S3
 
     API -->|"asyncpg + SSL<br/>pooled endpoint"| PG
     API -->|"enqueue · cache"| Redis
@@ -94,9 +94,20 @@ graph TB
     style FE fill:#0891b2,color:#fff
 ```
 
-**Why the frontend uploads directly to S3.** Routing 10 MB receipt images through a 1 GB API process
-would consume request-worker memory and stall the event loop. Presigned PUT keeps image bytes entirely
-out of the API. The API only ever handles the object key.
+**Why the frontend uploads directly to object storage.** Routing 10 MB receipt images through a 1 GB
+API process would consume request-worker memory and stall the event loop. A presigned PUT keeps image
+bytes entirely out of the API. The API only ever handles the object key.
+
+**Why Redis sits on the VM rather than in the managed box.** Upstash's free tier is 500k commands per
+*month*, and an idle Celery worker BRPOPs its queues about once a second — roughly 2.6M. The broker
+would stop answering a week into every month, and the symptom would be tasks silently not running. It
+holds only regenerable state, so it is capped at 64 MB and unpersisted rather than treated as a
+database (ADR-006).
+
+**Why only Postgres is managed.** It is the one dependency whose loss is not recoverable. That
+placement is also what made changing cloud cheap: when the deployment moved from AWS to Azure, the
+financial data did not move at all — only the VM and the object store did
+([ADR-010](adr/010-azure-migration.md)).
 
 **Why the worker runs at concurrency 1.** OpenCV, Tesseract, and Prophet are memory-heavy and
 CPU-bound. A second concurrent worker on t3.micro is an OOM kill. Throughput comes from queue
@@ -373,7 +384,7 @@ async into CPU-bound OCR/ML code, buys nothing and complicates everything.
 
 **Job durability.** Every Celery task is idempotent, keyed by a job row in Postgres. Retries are
 exponential with jitter; terminal failures persist the exception to a dead-letter table. Job state
-lives in Postgres, not Redis, so an Upstash eviction can't lose a user's receipt.
+lives in Postgres, not Redis, so a Redis eviction can't lose a user's receipt.
 
 ---
 
@@ -390,65 +401,73 @@ graph LR
     end
 
     subgraph Prod["Production"]
-        V["Vercel<br/>frontend"]
-        E["EC2 t3.micro<br/>compose: api · worker · beat<br/>Caddy TLS"]
+        V["Render<br/>frontend + /api proxy"]
+        E["Azure VM B1s<br/>compose: api · worker · beat · redis<br/>Caddy TLS"]
         N[("Neon PG")]
-        UP[("Upstash Redis")]
-        S3B["S3 + CloudWatch"]
+        AZ["Blob Storage + Log Analytics"]
     end
 
     DC --> CI
-    SC -->|"push :sha"| E
+    SC -->|"rsync + build in place"| E
     SC -->|"deploy"| V
-    E --> N & UP & S3B
+    E --> N & AZ
 ```
 
 Local development uses containerised Postgres, Redis, and **MinIO** as an S3-compatible store, so no
-AWS credentials are needed to develop and tests never touch real infrastructure. The `ObjectStore`
-port makes MinIO and S3 interchangeable.
+cloud credentials are needed to develop and tests never touch real infrastructure. The `ObjectStore`
+port makes MinIO, S3, and Azure Blob interchangeable — which is what
+[ADR-010](adr/010-azure-migration.md) actually cashed in when the deployment changed cloud.
 
-Deployment is image-tag based (`:${git_sha}`), so rollback is re-pointing the tag — appropriate for
-single-instance hosting and reversible in one command.
+The VM builds from source rather than pulling a tagged image: a container registry is a recurring
+charge (Azure Container Registry Basic is ~$5/month, billed idle) that would be more than half the
+cost of the VM it serves. Rollback is `git checkout` plus a redeploy, which is slower than re-pointing
+a tag and is the right trade at one instance.
 
 ### 8.1 Cost safety comes before the deployment target
 
-**AWS has no hard spending cap.** Budgets alert; they do not stop. For a
-deployment where an unexpected bill would genuinely hurt, that property decides
-the target — not the feature list.
+**No cloud provider offers a hard spending cap.** Budgets alert; they do not
+stop. For a deployment where an unexpected bill would genuinely hurt, the
+property that decides the target is not the feature list — it is what happens
+when the money runs out.
 
-The architecture already makes this a config choice rather than a rewrite: the
-`ObjectStore` port (ADR-004) drives any S3-compatible endpoint, and Postgres and
-Redis were never on AWS. So the default production stack is chosen for one
-property — **it stops serving rather than billing** when a free allowance runs
-out:
+Every service in the production stack is chosen for one property: **it stops
+serving rather than billing** when its free allowance is exhausted.
 
 | Concern | Service | Behaviour at the limit |
 |---|---|---|
-| Frontend | Vercel Hobby | Bandwidth capped |
-| API + worker | Fly.io / Render free | Service stops |
+| Frontend | Render free | Sleeps after 15 min idle; 750 h/month |
+| API + worker + beat | Azure VM, student subscription | Subscription disabled — no payment method on file |
 | Postgres | Neon free | Paused |
-| Cache / broker | Upstash free | Requests rejected |
-| Object storage | Cloudflare R2 | Capped; no egress charges |
+| Object storage | Azure Blob, same subscription | Disabled with the subscription |
+| Offer search | SerpAPI free plan | Hard-stops; local ledger stops first (ADR-008) |
 
-AWS (EC2 + S3 + CloudWatch) remains fully supported and is the M11 target, but
-it is opted into deliberately once a ten-dollar mistake is affordable. The
-runbook, budgets, and a circuit-breaker policy are in
-[`infra/aws/COST-SAFETY.md`](../infra/aws/COST-SAFETY.md).
+The architecture is what makes the target a config choice rather than a rewrite:
+the `ObjectStore` port (ADR-004) covers S3, R2, MinIO and Azure Blob, and
+Postgres was never on the compute provider at all.
+[`infra/azure/COST-SAFETY.md`](../infra/azure/COST-SAFETY.md) carries the
+runbook and the budget; [`infra/aws/`](../infra/aws/) still holds the previous
+EC2 stack, and [ADR-010](adr/010-azure-migration.md) records why the target
+moved — a six-month clock, not a cost scare.
 
 ### 8.2 Free-tier budget
 
+Against the $100 Azure for Students credit, which has to last twelve months —
+about **$8.33/month**.
+
 | Service | Tier | Limit | Headroom |
 |---|---|---|---|
-| Vercel Hobby | Free | 100 GB bandwidth/mo | Ample |
-| EC2 t3.micro | Free 12 mo | 750 h/mo | Full-time single instance |
+| Render free | Free | 750 h/mo, sleeps when idle | Adequate; first request after idle is slow |
+| Azure VM `Standard_B1s` | Free 12 mo (750 h) | 1 vCPU / 1 GB | Full-time single instance |
+| Standard SSD, 32 GiB | ~$2.40/mo | — | Billed from credit |
+| Static public IP | ~$3.65/mo | — | Billed from credit; Basic SKU retired Sept 2025 |
 | Neon Postgres | Free | 0.5 GB storage | ~500k transactions |
-| Upstash Redis | Free | 10k commands/day | Sufficient at low concurrency |
-| S3 | Free 12 mo | 5 GB | ~5k receipts |
-| CloudWatch | Free | 5 GB logs, 10 alarms | Adequate |
+| Azure Blob | Free 12 mo | 5 GB | ~5k receipts; expire at 90 days |
+| Log Analytics | Free | 5 GB/mo ingest | Capped at 1 GB/day on the workspace |
 
-**Memory budget on t3.micro (1 GB):** API ≈ 250 MB + Worker ≈ 450 MB + Beat ≈ 60 MB + Caddy ≈ 20 MB
-+ OS ≈ 150 MB ≈ **930 MB**. Tight by design, which is exactly why Postgres and Redis are external and
-`torch` is excluded. A 2 GB swap file absorbs Prophet's fit-time spikes.
+**Memory budget on B1s (1 GB):** API ≈ 250 MB + Worker ≈ 450 MB + Beat ≈ 60 MB + Redis ≤ 64 MB +
+Caddy ≈ 20 MB + OS ≈ 150 MB ≈ **994 MB**. Tight by design, which is exactly why Postgres is external,
+Redis is capped and unpersisted, and `torch` is excluded. A 2 GB swap file absorbs Prophet's fit-time
+spikes.
 
 ---
 
@@ -459,7 +478,7 @@ graph LR
     B["Browser"] -->|"Access token<br/>in memory (15 min)"| API
     B -->|"Refresh token<br/>httpOnly · Secure · SameSite=Lax"| API
     API -->|"Rotate + reuse detection"| DB[("Token families")]
-    API -->|"Instance profile<br/>(no static keys)"| AWS["S3 · CloudWatch"]
+    API -->|"Managed identity<br/>(no static keys)"| AZ["Blob Storage · Log Analytics"]
 ```
 
 - **Token placement.** Access tokens live in JavaScript memory and die with the tab; refresh tokens
@@ -471,10 +490,16 @@ graph LR
   asserts that no repository method can construct an unscoped query against a user-owned table. This
   is the class of bug that leaks another user's finances, so it is closed structurally rather than
   procedurally.
-- **Storage.** Buckets private with public access blocked; presigned URLs scoped to a single key with
-  short TTL. Receipts are PII.
-- **Least privilege.** EC2 instance profile grants only `s3:GetObject`/`PutObject` on the receipts
-  prefix and CloudWatch log writes. No long-lived access keys anywhere.
+- **Storage.** The container is private with anonymous access blocked; SAS URLs are scoped to a
+  single blob with a short TTL and are generated per request, never stored. Receipts are PII.
+  A read URL also pins the response content type to the type recorded when the upload was
+  authorised, so bytes smuggled past the upload check are never served as a document
+  ([ADR-010](adr/010-azure-migration.md)).
+- **Least privilege.** The VM's system-assigned managed identity holds `Storage Blob Data
+  Contributor` on one storage account and nothing else, and SAS URLs are signed with a 24-hour user
+  delegation key issued over Entra ID. **Shared account keys are disabled on the account**, so no
+  long-lived storage credential exists to leak — not in the repository, not in a log, not on the
+  host.
 
 ---
 
@@ -483,7 +508,8 @@ graph LR
 | Considered | Rejected because |
 |---|---|
 | **Microservices from day one** | Solo developer. Distributed tracing, network failure modes, and per-service deploys cost more than they return at this scale. ADR-001 buys the extraction path instead. |
-| **All services on one EC2 instance** | Postgres + Redis + worker + API on 1 GB OOMs on first Prophet fit. Managed free tiers cost $0 and remove the failure mode entirely. |
+| **All services on one VM, Postgres included** | Postgres + Redis + worker + API on 1 GB OOMs on the first Prophet fit, and it puts the one irreplaceable dependency on the one host that gets destroyed and rebuilt. Neon's free tier costs $0 and removes both. |
+| **Azure Container Apps instead of a VM** | Its free grant suits things that scale to zero, and Celery's worker and beat do not — one worker at 0.25 vCPU running continuously is ~648k vCPU-seconds/month against a 180k grant. It would also need a registry and a managed Redis. |
 | **Prophet as the only forecaster** | Undefined below ~2 seasonal cycles. Confidently wrong output directly contradicts the product thesis. |
 | **Direct retailer scraping** | ToS violation, defeated by anti-bot defences, unbounded maintenance, and real liability for a commercial product. Port + adapter defers this decision without blocking the feature. |
 | **LLM-generated recommendations** | Non-reproducible and non-auditable. Explainability is the differentiator; a black box would erase it. |

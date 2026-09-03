@@ -20,7 +20,10 @@ export function GetStartedButton({ size, className }: Pick<ButtonProps, "size" |
   const signedIn = status === "authenticated";
 
   return (
-    <Button size={size} className={className} asChild>
+    // `brand` rather than `primary`: this is the one action on the public site
+    // that is about the product rather than about the screen, which is exactly
+    // the budget the variant is reserved for.
+    <Button variant="brand" size={size} className={className} asChild>
       <Link href={signedIn ? "/dashboard" : "/register"}>
         {signedIn ? "Open dashboard" : "Get Started"}
       </Link>

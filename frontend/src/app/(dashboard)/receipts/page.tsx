@@ -11,6 +11,7 @@ import { Empty } from "@/components/ui/empty";
 import { FormError } from "@/features/auth/components/form-error";
 import { listReceipts, uploadReceipt, type Receipt } from "@/features/receipts/api";
 import { formatDate, formatMoney } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 
 const STATUS_LABEL: Record<Receipt["status"], string> = {
   pending_upload: "Waiting for upload",
@@ -39,7 +40,7 @@ export default function ReceiptsPage() {
   const [error, setError] = useState<unknown>(null);
 
   const receipts = useQuery({
-    queryKey: ["receipts"],
+    queryKey: keys.receipts.all(),
     queryFn: listReceipts,
     // Keep the list live while anything is still being read.
     refetchInterval: (query) =>
@@ -51,7 +52,7 @@ export default function ReceiptsPage() {
     onError: setError,
     onSuccess: async ({ receiptId }) => {
       setError(null);
-      await queryClient.invalidateQueries({ queryKey: ["receipts"] });
+      await queryClient.invalidateQueries({ queryKey: keys.receipts.all() });
       router.push(`/receipts/${receiptId}`);
     },
   });

@@ -125,7 +125,9 @@ class WishlistItem(UUIDMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Base
     __tablename__ = "wishlist_items"
 
     product_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     #: The price when they added it. The reference point for "cheaper than when
@@ -176,10 +178,14 @@ class PriceAlert(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "price_alerts"
 
     wishlist_item_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("wishlist_items.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("wishlist_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     product_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     previous_price: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
@@ -198,3 +204,39 @@ class PriceAlert(UUIDMixin, TenantMixin, TimestampMixin, Base):
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("ix_price_alerts_user_created", "user_id", text("created_at DESC")),)
+
+
+class OfferSnapshot(UUIDMixin, TimestampMixin, Base):
+    """Cached results of one offer search.
+
+    Shared reference data, so no `user_id`: two users searching the same
+    product get the same listings, and scoping the cache per user would
+    multiply the quota cost by the number of people who asked.
+
+    In Postgres rather than Redis, against this project's usual preference for
+    keeping regenerable state out of the database. The exception is deliberate:
+    what a cache miss costs here is *quota*, and quota is the one thing in this
+    system that cannot be regenerated -- an evicted key means a paid call.
+
+    Rows expire and are purged rather than accumulating. A cache with an
+    `expires_at` is a cache; a table of retailer prices that grows forever is a
+    republished catalogue, which is a different thing with different terms
+    attached to it.
+    """
+
+    __tablename__ = "offer_snapshots"
+
+    #: sha256 of the normalised query. Hashed rather than indexed on the text so
+    #: the unique constraint is a fixed width regardless of query length.
+    query_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    query_text: Mapped[str] = mapped_column(String(255), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    offers: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("provider", "query_hash", name="uq_offer_snapshots_provider_query"),
+        Index("ix_offer_snapshots_expires_at", "expires_at"),
+    )

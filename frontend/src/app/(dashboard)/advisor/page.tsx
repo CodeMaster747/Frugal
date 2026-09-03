@@ -17,7 +17,9 @@ import {
   type Verdict,
 } from "@/features/advisor/api";
 import { ImpactDumbbell } from "@/features/advisor/components/impact-dumbbell";
+import { OffersPanel } from "@/features/market/components/offers-panel";
 import { formatDate, formatMoney } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 
 /**
  * Verdict presentation.
@@ -66,7 +68,7 @@ export default function AdvisorPage() {
   const [manual, setManual] = useState({ name: "", price: "" });
 
   const results = useQuery({
-    queryKey: ["advisor-search", submitted],
+    queryKey: keys.advisor.search(submitted),
     queryFn: () => searchProducts(submitted),
     enabled: submitted.length > 0,
   });
@@ -270,6 +272,16 @@ function AdviceCard({ advice, onPick }: { advice: Advice; onPick: (offer: Offer)
           </div>
         )}
       </div>
+
+      {/* Sits between the verdict and the impact detail on purpose. The verdict
+       * answers the question asked; "could I pay less for it" is the first thing
+       * a reader wants next, and it is a different question from the impact
+       * breakdown below. */}
+      <OffersPanel
+        query={advice.product_query}
+        askingPrice={advice.price}
+        currency={advice.currency}
+      />
 
       <Section variant="bordered" headingLevel={3} title="What this does to your position">
         <ImpactDumbbell

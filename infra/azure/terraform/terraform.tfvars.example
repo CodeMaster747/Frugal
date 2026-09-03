@@ -1,0 +1,41 @@
+# Copy to terraform.tfvars and fill in. That file is gitignored -- it holds
+# your home IP address and your public key, neither of which belongs in the
+# repository.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+# az account show --query id -o tsv
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# curl -s ifconfig.me
+# Your address, not a range. Re-run ../allow-my-ip.sh when your ISP moves you,
+# then update this so the next `terraform apply` does not move it back.
+ssh_source_address = "203.0.113.10"
+
+# cat ~/.ssh/id_ed25519.pub
+ssh_public_key = "ssh-ed25519 AAAAC3Nz... you@example.com"
+
+# Where alerts go. Azure sends these immediately -- there is no confirmation
+# click to forget, unlike SNS.
+alert_email = "you@example.com"
+
+# The frontend's public origin. Load-bearing: the browser PUTs receipt bytes
+# straight to Blob Storage, and Azure requires the `x-ms-blob-type` header,
+# which makes every upload preflight. A missing origin here fails as a CORS
+# error that reads like a broken URL.
+cors_allowed_origins = ["https://frugal-web.onrender.com"]
+
+# Optional -- defaults shown.
+#
+# location            = "southeastasia"
+# vm_size             = "Standard_B1s"
+# admin_username      = "azureuser"
+# log_retention_days  = 30
+# receipt_expiry_days = 90
+# monthly_budget      = 9
+#
+# There is deliberately no `domain_name` here. Caddy reads DOMAIN from
+# /opt/frugal/.env on the VM, which Terraform does not write and must not --
+# that file holds secrets. Setting the domain is RUNBOOK section 2, not an
+# input to `apply`. The AWS module declared such a variable and nothing ever
+# read it, which is worse than not having one.

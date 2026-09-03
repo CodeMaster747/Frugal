@@ -1,0 +1,50 @@
+// Merge into `android { }` in android/app/build.gradle after `npx cap add android`.
+//
+// Capacitor generates that file, so this fragment is kept separately rather than
+// as a full replacement -- regenerating the Android project would silently
+// discard a wholesale copy, and the loss would only show up as an APK that
+// installs everywhere it should not.
+
+    flavorDimensions "smsaccess"
+
+    productFlavors {
+        // Installs cleanly for everyone. Never trips Play Protect, because the
+        // merged manifest declares no SMS permission at all.
+        standard {
+            dimension "smsaccess"
+            applicationId "app.frugal"
+            resValue "string", "app_name", "Frugal"
+            resValue "string", "title_activity_main", "Frugal"
+        }
+        // A distinct applicationId, not a suffix on a shared base. A user must
+        // not be able to "upgrade" from the no-permission build into this one
+        // -- that is a permission escalation they never agreed to -- and Play
+        // Protect's verdict on this package must not attach to the other.
+        smsreader {
+            dimension "smsaccess"
+            applicationId "app.frugal.sms"
+            resValue "string", "app_name", "Frugal (SMS)"
+            resValue "string", "title_activity_main", "Frugal (SMS)"
+        }
+    }
+
+    signingConfigs {
+        release {
+            // Self-signed. Play is not involved, so no CA and no fee -- the key
+            // identifies the publisher, not the variant, so both flavours share
+            // it. Passwords come from CI secrets or a local gradle.properties
+            // that is gitignored; a keystore password in the repo is a keystore
+            // anyone can re-sign with.
+            storeFile file(System.getenv("FRUGAL_KEYSTORE") ?: "../keystore/frugal.jks")
+            storePassword System.getenv("FRUGAL_KEYSTORE_PASSWORD")
+            keyAlias System.getenv("FRUGAL_KEY_ALIAS") ?: "frugal"
+            // Falls back to the store password, because the keystore is PKCS12
+            // (the JDK 9+ default) and PKCS12 *requires* the two to be equal --
+            // keytool does not even offer a separate key password when creating
+            // one. Requiring both to be exported bought nothing and cost a
+            // "missing required property keyPassword" failure 24 seconds into
+            // every build where the second export was forgotten.
+            keyPassword System.getenv("FRUGAL_KEY_PASSWORD")
+                ?: System.getenv("FRUGAL_KEYSTORE_PASSWORD")
+        }
+    }

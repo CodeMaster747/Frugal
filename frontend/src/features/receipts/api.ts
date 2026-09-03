@@ -86,18 +86,23 @@ export const deleteReceipt = (id: string) =>
  * event loop (FR-4.1).
  */
 export async function uploadReceipt(file: File): Promise<{ receiptId: string; jobId: string }> {
-  const ticket = await apiFetch<{ receipt_id: string; upload_url: string }>(
-    "/api/v1/receipts/upload-url",
-    {
-      method: "POST",
-      body: JSON.stringify({ content_type: file.type, size_bytes: file.size }),
-    },
-  );
+  const ticket = await apiFetch<{
+    receipt_id: string;
+    upload_url: string;
+    upload_headers?: Record<string, string>;
+  }>("/api/v1/receipts/upload-url", {
+    method: "POST",
+    body: JSON.stringify({ content_type: file.type, size_bytes: file.size }),
+  });
 
+  // `upload_headers` comes from whichever storage adapter issued the URL:
+  // empty on S3, `x-ms-blob-type: BlockBlob` on Azure, which rejects a PUT
+  // without it. Spread rather than branched on, so this file never learns
+  // which backend the deployment runs (ADR-010).
   const put = await fetch(ticket.upload_url, {
     method: "PUT",
     body: file,
-    headers: { "Content-Type": file.type },
+    headers: { "Content-Type": file.type, ...(ticket.upload_headers ?? {}) },
   });
   if (!put.ok) throw new Error(`Upload failed (${put.status})`);
 

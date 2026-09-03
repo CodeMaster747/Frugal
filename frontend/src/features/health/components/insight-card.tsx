@@ -50,7 +50,7 @@ export function InsightCard({
   return (
     <article
       className={`rounded-card border border-hairline bg-surface ${
-        insight.read_at === null ? "border-l-2 border-l-series-1" : ""
+        insight.read_at === null ? "border-l-2 border-l-brand" : ""
       }`}
       data-testid="insight-card"
       data-severity={insight.severity}

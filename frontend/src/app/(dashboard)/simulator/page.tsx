@@ -19,6 +19,7 @@ import {
   type ScenarioTemplate,
 } from "@/features/simulator/api";
 import { formatDate, formatMoney } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 
 /**
  * Outlook presentation.
@@ -52,7 +53,7 @@ const OUTLOOK: Record<
 };
 
 export default function SimulatorPage() {
-  const templates = useQuery({ queryKey: ["scenario-templates"], queryFn: getTemplates });
+  const templates = useQuery({ queryKey: keys.simulator.templates(), queryFn: getTemplates });
   const [chosen, setChosen] = useState<string>("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [horizon, setHorizon] = useState(24);

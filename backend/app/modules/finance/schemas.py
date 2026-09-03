@@ -30,6 +30,21 @@ from app.modules.finance.models import (
     TransactionSource,
 )
 
+# Re-exported deliberately. `TransactionFilters.kind` is typed as this enum, so
+# a consumer module cannot build a filter without it -- and reaching into
+# `finance.models` for it is what `finance-models-stay-behind-the-service`
+# forbids. Naming them here makes the enums part of finance's published
+# contract rather than an internal a caller has to smuggle out. (mypy runs with
+# `no_implicit_reexport`, so the redundant-looking alias is what publishes it.)
+__all__ = [
+    "AccountType",
+    "Cadence",
+    "GoalStatus",
+    "RecurringType",
+    "TransactionKind",
+    "TransactionSource",
+]
+
 Amount = Annotated[Decimal, Field(gt=0, max_digits=18, decimal_places=2)]
 Currency = Annotated[str, Field(min_length=3, max_length=3)]
 

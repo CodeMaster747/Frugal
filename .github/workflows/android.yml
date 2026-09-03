@@ -1,0 +1,125 @@
+name: Android
+
+# The APKs are published from tags, not from every push: a signed release build
+# is slow, and there is no value in producing one nobody will download.
+#
+# The permission check below runs on pull requests too, because that is the one
+# thing here that can silently break the product between releases.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "mobile/**"
+      - ".github/workflows/android.yml"
+
+env:
+  JAVA_VERSION: "21"
+  NODE_VERSION: "22"
+
+jobs:
+  build:
+    name: Build both variants
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # `android/` is regenerable and not committed, so CI builds it the same
+      # way a developer does. setup-android.sh is idempotent and is the single
+      # description of what Capacitor's scaffold needs on top of it.
+      - name: Generate and configure the Android project
+        working-directory: mobile
+        run: |
+          npm install
+          npx cap add android
+          ./setup-android.sh
+          npx cap sync android
+
+      - name: Build both flavours
+        working-directory: mobile/android
+        env:
+          FRUGAL_KEYSTORE: ${{ github.workspace }}/mobile/keystore/frugal.jks
+          FRUGAL_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          FRUGAL_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          FRUGAL_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleStandardRelease assembleSmsreaderRelease
+
+      # The assertion the standard build's entire promise rests on.
+      #
+      # Play Protect blocks any website-sideloaded APK that merely *declares*
+      # READ_SMS or RECEIVE_SMS. A <uses-permission> that drifts from the
+      # smsreader flavour into src/main is a two-character change that still
+      # compiles, still runs, and quietly stops the standard build being
+      # installable for the users it exists for. Nothing else catches it.
+      #
+      # If only one Android check is ever written, it is this one.
+      - name: The standard build must declare no SMS permission
+        run: |
+          set -euo pipefail
+          AAPT=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name aapt2 | sort -V | tail -1)
+          STANDARD=$(find mobile/android/app/build/outputs/apk/standard/release -name '*.apk' | head -1)
+          SMSREADER=$(find mobile/android/app/build/outputs/apk/smsreader/release -name '*.apk' | head -1)
+
+          echo "Standard APK: $STANDARD"
+          if "$AAPT" dump permissions "$STANDARD" | grep -qE 'android\.permission\.(READ_SMS|RECEIVE_SMS|BIND_NOTIFICATION_LISTENER_SERVICE)'; then
+            echo "::error::The standard build declares an SMS or notification-listener permission."
+            echo "Play Protect will block it from installing. Check that no <uses-permission>"
+            echo "leaked into android/app/src/main/AndroidManifest.xml."
+            exit 1
+          fi
+          echo "OK: no blocked permission in the standard build."
+
+          # And the converse, so the SMS build is not silently shipped inert.
+          echo "SMS APK: $SMSREADER"
+          "$AAPT" dump permissions "$SMSREADER" | grep -q 'android.permission.READ_SMS' || {
+            echo "::error::The smsreader build is missing READ_SMS and would capture nothing."
+            exit 1
+          }
+          echo "OK: the smsreader build declares READ_SMS."
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find mobile/android/app/build/outputs/apk -name '*-release.apk' -exec cp {} dist/ \;
+          cd dist && sha256sum *.apk | tee SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: dist/
+
+  # The Kotlin sender allowlist is generated from the Python one. This is the
+  # same assertion `test_device_allowlist_matches_kotlin` makes, run here too
+  # because the backend job's container does not mount `mobile/`.
+  filter-drift:
+    name: The device filter matches the server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Regenerate and compare
+        run: |
+          set -euo pipefail
+          cd backend
+          python scripts/generate_sender_filter.py > /tmp/SenderFilter.kt
+          if ! diff -u \
+            ../mobile/android-overlay/app/src/smsreader/java/app/frugal/sms/SenderFilter.kt \
+            /tmp/SenderFilter.kt; then
+            echo "::error::SenderFilter.kt is stale. Regenerate it:"
+            echo "  cd backend && python scripts/generate_sender_filter.py > \\"
+            echo "    ../mobile/android-overlay/app/src/smsreader/java/app/frugal/sms/SenderFilter.kt"
+            exit 1
+          fi

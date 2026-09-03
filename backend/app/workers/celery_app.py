@@ -28,7 +28,16 @@ configure_logging(level=settings.log_level, fmt=settings.log_format)
 # One call per task module: `related_name` matches a single filename, so a new
 # module that is not listed here is silently never registered -- the failure
 # mode is a task that queues fine and never runs.
-for _module in ("receipts", "forecasting", "market", "notifications"):
+for _module in (
+    "receipts",
+    "forecasting",
+    "market",
+    "notifications",
+    "sms",
+    "personalization",
+    "pricegraph",
+    "scraping",
+):
     celery_app.autodiscover_tasks(["app.workers.tasks"], related_name=_module, force=True)
 
 __all__ = ["celery_app"]

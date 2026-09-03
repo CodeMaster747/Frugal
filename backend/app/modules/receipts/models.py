@@ -61,6 +61,17 @@ class FieldName(StrEnum):
     SUBTOTAL = "subtotal"
     PAYMENT_METHOD = "payment_method"
 
+    # Store identity (M16). These are what turn a private receipt into a row in
+    # a shared price graph -- a price with no located seller compares nothing.
+    #
+    # Deliberately absent from REQUIRED_FIELDS: a user photographing a receipt
+    # to record a purchase must never be blocked because the shop's GSTIN was
+    # smudged. They gate *promotion*, not commit.
+    GSTIN = "gstin"
+    STORE_ADDRESS = "store_address"
+    STORE_PINCODE = "store_pincode"
+    STORE_PHONE = "store_phone"
+
 
 #: Fields a receipt cannot be committed without.
 REQUIRED_FIELDS = (FieldName.MERCHANT, FieldName.DATE, FieldName.TOTAL)
@@ -91,7 +102,22 @@ class Receipt(UUIDMixin, TenantMixin, TimestampMixin, SoftDeleteMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
 
     committed_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("transactions.id", ondelete="SET NULL")
+        ForeignKey(
+            "transactions.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
+    )
+
+    #: The cross-user duplicate check (ADR-013).
+    #:
+    #: The link runs this way and only this way. `receipt_fingerprints` names
+    #: nobody, so "has anyone contributed this receipt" is answerable in one
+    #: indexed lookup while "who" is not answerable from that table at all --
+    #: the only path to a person is through this tenant-scoped column, which
+    #: the asking user cannot read. That asymmetry is the privacy property.
+    fingerprint_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("receipt_fingerprints.id", ondelete="SET NULL"), index=True
     )
 
     fields: Mapped[list[ReceiptField]] = relationship(

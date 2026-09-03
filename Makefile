@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
-.PHONY: help up down logs build migrate revision downgrade seed shell test test-unit eval e2e \
+.PHONY: help up down logs build migrate migrate-signals revision revision-signals \
+	downgrade downgrade-signals seed shell test test-unit eval e2e \
         lint format types check check-backend check-frontend clean frontend-dev frontend-install
 
 COMPOSE := docker compose
@@ -30,11 +31,25 @@ shell: ## Shell into the api container
 
 # --- database ----------------------------------------------------------------
 
-migrate: ## Apply migrations
+migrate: ## Apply migrations to both databases
 	$(API) alembic upgrade head
+	# Skips cleanly and says so when SIGNALS_DATABASE_URL is unset -- the second
+	# database is optional (ADR-011). `alembic_signals/env.py` itself raises
+	# rather than no-opping, because a migration runner that silently does
+	# nothing is how a schema drifts; the skip lives in the wrapper.
+	$(API) python -m scripts.migrate_signals
+
+migrate-signals: ## Apply migrations to the personalization database only
+	$(API) python -m scripts.migrate_signals
 
 revision: ## Autogenerate a migration (make revision M="add transactions")
 	$(API) alembic revision --autogenerate -m "$(M)"
+
+revision-signals: ## Autogenerate a personalization migration (make revision-signals M="...")
+	$(API) alembic -c alembic_signals.ini revision --autogenerate -m "$(M)"
+
+downgrade-signals: ## Roll back one personalization migration
+	$(API) alembic -c alembic_signals.ini downgrade -1
 
 downgrade: ## Roll back one migration
 	$(API) alembic downgrade -1
@@ -64,22 +79,29 @@ eval: ## AI evaluation harnesses — prints measured baselines
 	$(API) pytest tests/eval -v -s -m eval
 
 lint: ## ruff + mypy + import-linter
-	$(API) ruff check app tests scripts
-	$(API) ruff format --check app tests scripts
+	# `alembic_signals` is in the list because it is real source: env.py chooses
+	# the metadata and the version table, and a mistake there is a migration
+	# applied to the wrong database.
+	$(API) ruff check app tests scripts alembic_signals
+	$(API) ruff format --check app tests scripts alembic_signals
 	$(API) mypy app scripts
 	$(API) lint-imports --config .importlinter
 
 format: ## Apply formatting and safe fixes
-	$(API) ruff format app tests scripts
-	$(API) ruff check --fix app tests scripts
+	$(API) ruff format app tests scripts alembic_signals
+	$(API) ruff check --fix app tests scripts alembic_signals
 
-types: ## Regenerate frontend types from the OpenAPI schema (needs the stack up)
+types: ## Regenerate frontend types from the OpenAPI schema
+	# Dumped from `app.openapi()` in the api container -- no port, no stack
+	# needed. `make types:live` remains for a schema served by a running API.
+	$(API) python -m scripts.dump_openapi openapi.json
 	cd frontend && npm run generate:types
 
 check-backend: lint test ## Backend gate
 
 check-frontend: ## Frontend gate
 	cd frontend && npx next typegen && npm run lint && npm run format:check \
+		&& npm run check:tokens \
 		&& npm run typecheck && npm run build
 
 e2e: ## Playwright smoke tests (needs the stack up)

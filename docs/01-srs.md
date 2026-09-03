@@ -67,7 +67,7 @@ Each requirement carries a stable ID. `MUST` = v1 blocking. `SHOULD` = v1 if tim
 | FR-1.5 | Google OAuth 2.0 sign-in, linking to an existing email account when one matches. | SHOULD |
 | FR-1.6 | Profile: display name, base currency, timezone, locale. | MUST |
 | FR-1.7 | Rate limiting on login, register, and refresh (per IP and per account). | MUST |
-| FR-1.8 | Account deletion removes or anonymises all user data, including S3 objects. | MUST |
+| FR-1.8 | Account deletion removes or anonymises all user data, including stored receipt objects. | MUST |
 
 ### FR-2 Financial core (M2)
 
@@ -104,7 +104,7 @@ Each requirement carries a stable ID. `MUST` = v1 blocking. `SHOULD` = v1 if tim
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-4.1 | Upload receipt image (JPEG/PNG/HEIC/PDF, ≤10 MB) via presigned S3 URL — bytes never transit the API. | MUST |
+| FR-4.1 | Upload receipt image (JPEG/PNG/HEIC/PDF, ≤10 MB) via a presigned object-storage URL — bytes never transit the API. | MUST |
 | FR-4.2 | Async OCR pipeline: perspective correction → deskew → denoise → adaptive threshold → Tesseract. | MUST |
 | FR-4.3 | Extract merchant, date, total, tax, and line items, **each with an independent confidence score**. | MUST |
 | FR-4.4 | Fields below the confidence threshold are flagged and routed to a review queue. | MUST |
@@ -195,8 +195,10 @@ Each requirement carries a stable ID. `MUST` = v1 blocking. `SHOULD` = v1 if tim
 ### NFR-2 Security
 - Argon2id password hashing; access tokens in memory only, refresh in httpOnly cookies (NFR rationale: localStorage tokens are readable by any XSS payload).
 - **Tenant isolation enforced in a base repository class**, not by per-query discipline. Every user-owned query is scoped by `user_id` at the data-access layer; a query that bypasses it fails a test.
-- S3 buckets private with public access blocked; all object access via short-lived presigned URLs.
-- IAM roles scoped to least privilege; no long-lived keys on the EC2 host (instance profile only).
+- Object storage private with anonymous access blocked; all access via short-lived presigned URLs,
+  generated per request and never stored.
+- Cloud identities scoped to least privilege; **no long-lived keys on the host** — the VM
+  authenticates as a managed identity, and shared storage account keys are disabled outright.
 - Secrets from environment/parameter store, never committed. `.env.example` documents shape only.
 - Input validated by Pydantic at every boundary; SQLAlchemy parameterisation throughout.
 - Security headers, CORS allowlist, CSRF protection on cookie-authenticated mutations.
@@ -212,7 +214,7 @@ Each requirement carries a stable ID. `MUST` = v1 blocking. `SHOULD` = v1 if tim
 ### NFR-4 Observability
 - Structured JSON logging with request ID and user ID on every line.
 - Request ID propagated through Celery tasks so a job traces back to its originating request.
-- CloudWatch log groups, metric filters on error rate, alarms on error-rate and queue-depth thresholds.
+- Centralised log collection with alerts on error rate, host availability, disk, and CPU credits.
 - `/health` (liveness) and `/health/ready` (DB + Redis reachability) endpoints.
 
 ### NFR-5 Quality
@@ -240,7 +242,7 @@ Each requirement carries a stable ID. `MUST` = v1 blocking. `SHOULD` = v1 if tim
 
 | Constraint | Consequence |
 |---|---|
-| EC2 t3.micro = 1 GB RAM | Postgres and Redis **cannot** be co-hosted. Neon and Upstash host them. Rejecting all-on-EC2 is what makes the free tier actually viable. |
+| Single VM = 1 GB RAM | Postgres **cannot** be co-hosted; Neon hosts it. Redis can be, capped at 64 MB and unpersisted, because it holds only regenerable state. Refusing to put the system of record on the disposable host is what makes the free tier viable. |
 | Prophet toolchain ≈ 400 MB | Prophet loads lazily, in the worker only, and only for the ≥180-day tier. It is never imported by the API process. |
 | torch / sentence-transformers ≈ 2 GB | **Excluded from v1.** TF-IDF meets FR-5 requirements at a fraction of the footprint. |
 | Tesseract accuracy ≈ 60–70% on thermal receipts | Human-in-the-loop review (FR-4.4–4.6) is a functional requirement, not a fallback. |

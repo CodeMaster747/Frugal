@@ -14,7 +14,13 @@ import {
 } from "@/features/marketing/components/visuals";
 
 /**
- * The home screen.
+ * What the product is, and why.
+ *
+ * This was `/` until M18, when the map took that slot: the landing screen is now
+ * the thing the product does rather than a description of it. The description
+ * still has to exist -- it is what a search engine indexes, what a link preview
+ * quotes, and what somebody sent here by a friend reads before signing up -- so
+ * it moved rather than being deleted.
  *
  * A server component throughout, with two client islands: the CTA, which has to
  * know whether you are signed in, and Reveal. Everything else is static markup
@@ -67,7 +73,7 @@ export default function HomePage() {
       <section className={`${CONTAINER} pt-16 pb-16 sm:pt-20`}>
         <div className="mx-auto max-w-2xl space-y-6 text-center">
           <p className="type-eyebrow text-ink-muted">Frugal</p>
-          <h1 className="type-display text-balance md:type-hero">
+          <h1 className="type-editorial text-balance md:type-editorial-hero">
             Personal finance that tells you what to do next.
           </h1>
           <p className="mx-auto max-w-prose type-body text-ink-secondary">
@@ -94,7 +100,7 @@ export default function HomePage() {
         <Reveal className="space-y-8">
           <div className="space-y-2">
             <p className="type-eyebrow text-ink-muted">How it works</p>
-            <h2 className="type-display text-balance">
+            <h2 className="type-editorial text-balance">
               Three steps, then it answers questions.
             </h2>
           </div>
@@ -183,7 +189,9 @@ export default function HomePage() {
         <Reveal>
           <Section variant="bordered" className="space-y-6 py-12 text-center">
             <div className="space-y-2">
-              <h2 className="type-display text-balance">Start with a question you have now.</h2>
+              <h2 className="type-editorial text-balance">
+                Start with a question you have now.
+              </h2>
               <p className="mx-auto max-w-prose type-body text-ink-secondary">
                 Create an account, load the demo data, and put a real decision to it.
               </p>

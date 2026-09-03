@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keys } from "@/lib/api/query-keys";
 import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 
@@ -30,25 +31,25 @@ export default function HealthPage() {
   const queryClient = useQueryClient();
   const [showRubric, setShowRubric] = useState(false);
 
-  const health = useQuery({ queryKey: ["health-score"], queryFn: getHealthScore });
-  const insights = useQuery({ queryKey: ["insights"], queryFn: () => getInsights() });
+  const health = useQuery({ queryKey: keys.health.score(), queryFn: getHealthScore });
+  const insights = useQuery({ queryKey: keys.health.insights(), queryFn: () => getInsights() });
   const rubric = useQuery({
-    queryKey: ["health-rubric"],
+    queryKey: keys.health.rubric(),
     queryFn: getRubric,
     enabled: showRubric,
   });
 
   const refresh = useMutation({
     mutationFn: refreshInsights,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["insights"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.health.insights() }),
   });
   const dismiss = useMutation({
     mutationFn: dismissInsight,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["insights"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.health.insights() }),
   });
   const read = useMutation({
     mutationFn: markInsightRead,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["insights"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.health.insights() }),
   });
 
   return (

@@ -11,7 +11,11 @@ recommendations**. Its defining property is not the feature list — it is that 
 forecast can be decomposed into the inputs that produced it. A recommendation you cannot interrogate is
 one you cannot act on with confidence.
 
-> **Status:** Milestones 0–4 complete and verified. Next: Milestone 5 — transaction categorisation (TF-IDF + logistic regression).
+> **Status:** Milestones 0–18 complete. M11 (production hardening) is built; the deployment target
+> moved from AWS to Azure (ADR-010), and HTTPS and alarm verification remain pending the deploy.
+> M14–M18 added a crowdsourced price graph built from verified receipts (ADR-013), a separate
+> database for personalization signals (ADR-011), a narrow allowlisted fetcher that ships disabled
+> (ADR-012), and a map as the app's first screen.
 
 ---
 
@@ -56,19 +60,23 @@ Read in order for the full picture; each document links to the next.
 | [06 — Project structure](docs/06-project-structure.md) | Backend and frontend folder layouts, boundary enforcement, configuration |
 | [07 — Roadmap](docs/07-roadmap.md) | Twelve milestones with exit criteria, dependency graph, risk register |
 | [08 — Eval baselines](docs/08-eval-baselines.md) | What the AI modules actually score, and where they are weak |
-| [09 — Deployment](docs/09-deployment.md) | First deployment end to end: Render · EC2 · Neon · S3, with the four checks that only fail in production |
-| [ADRs](docs/adr/) | Seven binding decisions, with their costs |
+| [09 — Deployment](docs/09-deployment.md) | First deployment end to end: Render · Azure VM · Neon · Blob Storage, with the four checks that only fail in production |
+| [ADRs](docs/adr/) | Ten binding decisions, with their costs |
 
 ---
 
 ## Architecture at a glance
 
 ```
-Render (Next.js 16)  →  EC2 t3.micro : Caddy · FastAPI · Celery worker + beat · Redis
-   frontend, and a                ├── Neon Postgres   (managed, free)
-   same-origin proxy              ├── S3              (receipts, private + presigned)
-   for /api                       └── CloudWatch      (logs · metrics · alarms)
+Render (Next.js 16)  →  Azure VM B1s : Caddy · FastAPI · Celery worker + beat · Redis
+   frontend, and a                ├── Neon Postgres    (managed, free)
+   same-origin proxy              ├── Azure Blob       (receipts, private + SAS)
+   for /api                       └── Log Analytics    (logs · metrics · alerts)
 ```
+
+Postgres is managed rather than co-hosted, and the frontend is on Render — so neither moved when the
+deployment left AWS for Azure ([ADR-010](docs/adr/010-azure-migration.md)). Changing cloud cost one
+storage adapter and one config value; the financial data never migrated at all.
 
 A **modular monolith** — one deployable, with hard internal boundaries enforced by `import-linter` in
 CI so any module can later be extracted without a rewrite. Runs at **$0/month** on free tiers.
@@ -91,11 +99,11 @@ React Hook Form + Zod · Recharts · Playwright
 
 **Backend** — FastAPI · Python 3.11 · SQLAlchemy 2 (async) · Alembic · Pydantic v2 · Celery · Redis
 
-**Data** — PostgreSQL 16
+**Data** — PostgreSQL 18 (Neon in production, matched locally and in CI)
 
 **AI/ML** — OpenCV · Tesseract · scikit-learn (TF-IDF + logistic regression) · Prophet · statsmodels
 
-**Infrastructure** — Docker · Docker Compose · AWS EC2/S3/IAM/CloudWatch · GitHub Actions · Vercel
+**Infrastructure** — Docker · Docker Compose · Azure VM/Blob/Managed Identity/Monitor · Terraform · GitHub Actions · Render
 
 ---
 
@@ -170,13 +178,16 @@ make frontend-dev      # http://localhost:3000
 make e2e               # Playwright smoke tests (needs the stack up)
 ```
 
-No AWS account is needed for local development: MinIO stands in for S3 behind the `ObjectStore` port,
-and every port ships a fake, so the backend suite runs with no network and no credentials.
+No cloud account is needed for local development: MinIO stands in for object storage behind the
+`ObjectStore` port, and every port ships a fake, so the backend suite runs with no network and no
+credentials.
 
-> **Deploying?** Read [`infra/aws/COST-SAFETY.md`](infra/aws/COST-SAFETY.md) first. AWS budgets
-> alert but do not stop spending, so the default production stack (Vercel · Fly.io · Neon · Upstash ·
-> Cloudflare R2) is chosen because each service *stops serving* rather than billing when a free
-> allowance runs out. AWS is supported and is the M11 target — opted into deliberately.
+> **Deploying?** Read [`infra/azure/COST-SAFETY.md`](infra/azure/COST-SAFETY.md) first. Production
+> runs on an Azure for Students subscription, which has no payment method attached and is *disabled*
+> rather than billed when its credit runs out — the same property every other service in the stack
+> was chosen for (Neon, Render, SerpAPI's free plan). [`infra/aws/`](infra/aws/) still holds the
+> previous EC2 deployment; [ADR-010](docs/adr/010-azure-migration.md) records why the target moved,
+> and it was the six-month clock rather than a cost scare.
 
 ### Milestone status
 
@@ -239,8 +250,10 @@ The baseline is measured on **synthetic receipts degraded** with rotation, blur,
 light and perspective. Real thermal receipts read worse — treat it as an upper bound and watch the
 trend. `make eval` reprints it.
 
-**Gates:** 233 backend tests (82% coverage) · ruff · `mypy --strict` ·
-4 import-linter contracts · 31 Playwright specs · migrations reverse cleanly.
+**Gates:** 946 backend tests (86% coverage) · ruff · `mypy --strict` ·
+17 import-linter contracts · 97 Playwright tests across 13 specs · both migration trees reverse
+cleanly · `alembic check` on each (the models and the schema agree) · design tokens resolve ·
+the committed OpenAPI types match the API.
 
 The M0 invariant is the one that matters most. It is enforced before any engine exists, so no
 engine can ever ship a conclusion without its reasoning.

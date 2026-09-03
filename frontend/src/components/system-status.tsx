@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react";
 
 import { ApiError, getReadiness } from "@/lib/api/client";
+import { keys } from "@/lib/api/query-keys";
 
 /**
  * Live backend readiness.
@@ -15,7 +16,7 @@ import { ApiError, getReadiness } from "@/lib/api/client";
  */
 export function SystemStatus() {
   const { data, isPending, error } = useQuery({
-    queryKey: ["system", "readiness"],
+    queryKey: keys.system.readiness(),
     queryFn: getReadiness,
     refetchInterval: 15_000,
   });

@@ -18,6 +18,7 @@ import {
   type ReceiptField,
 } from "@/features/receipts/api";
 import { formatDate, formatMoney } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 import { cn } from "@/lib/utils";
 
 const LABELS: Record<string, string> = {
@@ -52,18 +53,18 @@ export function ReceiptReview({ receiptId }: { receiptId: string }) {
   const [allowDuplicate, setAllowDuplicate] = useState(false);
 
   const receipt = useQuery({
-    queryKey: ["receipt", receiptId],
+    queryKey: keys.receipts.one(receiptId),
     queryFn: () => getReceipt(receiptId),
     // Poll only while the worker is still on it.
     refetchInterval: (query) =>
       ["queued", "processing"].includes(query.state.data?.status ?? "") ? 1500 : false,
   });
   const image = useQuery({
-    queryKey: ["receipt-image", receiptId],
+    queryKey: keys.receipts.image(receiptId),
     queryFn: () => getImageUrl(receiptId),
   });
-  const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
-  const categories = useQuery({ queryKey: ["categories"], queryFn: listCategories });
+  const accounts = useQuery({ queryKey: keys.finance.accounts(), queryFn: listAccounts });
+  const categories = useQuery({ queryKey: keys.finance.categories(), queryFn: listCategories });
 
   const save = useMutation({
     mutationFn: () => correctFields(receiptId, edits),

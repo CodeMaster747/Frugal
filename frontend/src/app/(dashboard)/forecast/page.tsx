@@ -20,6 +20,7 @@ import {
   type Forecast,
 } from "@/features/forecast/api";
 import { formatDate, formatMoney, todayISO } from "@/lib/format";
+import { keys } from "@/lib/api/query-keys";
 
 const HORIZONS = [30, 60, 90] as const;
 
@@ -35,7 +36,7 @@ export default function ForecastPage() {
   const [event, setEvent] = useState({ on: todayISO(), amount: "", label: "" });
 
   const forecast = useQuery({
-    queryKey: ["forecast", horizon],
+    queryKey: keys.forecast.horizon(horizon),
     queryFn: () => getForecast(horizon),
     // The worker may be computing a better tier; the response says when.
     refetchInterval: (query) => {
@@ -44,7 +45,7 @@ export default function ForecastPage() {
     },
   });
 
-  const recurring = useQuery({ queryKey: ["recurring"], queryFn: getRecurring });
+  const recurring = useQuery({ queryKey: keys.finance.recurring(), queryFn: getRecurring });
 
   const scenario = useMutation({
     mutationFn: () =>

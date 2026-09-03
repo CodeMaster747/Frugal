@@ -29,8 +29,13 @@ class InMemoryObjectStore:
     async def presign_put(self, key: str, content_type: str, expires_in: int) -> str:
         return f"{self.base_url}/{key}?op=put&ct={content_type}&exp={int(time.time()) + expires_in}"
 
-    async def presign_get(self, key: str, expires_in: int) -> str:
-        return f"{self.base_url}/{key}?op=get&exp={int(time.time()) + expires_in}"
+    async def presign_get(self, key: str, expires_in: int, content_type: str | None = None) -> str:
+        url = f"{self.base_url}/{key}?op=get&exp={int(time.time()) + expires_in}"
+        return f"{url}&ct={content_type}" if content_type else url
+
+    @property
+    def upload_headers(self) -> dict[str, str]:
+        return {}
 
     async def get_bytes(self, key: str) -> bytes:
         if key not in self.objects:

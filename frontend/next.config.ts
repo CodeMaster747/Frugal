@@ -45,6 +45,31 @@ const nextConfig: NextConfig = {
     return [
       { source: "/api/:path*", destination: `${backendOrigin}/api/:path*` },
       { source: "/health/ready", destination: `${backendOrigin}/health/ready` },
+      // The APK reads this at boot to compare its native plugin version. Same
+      // reason as the two above: keeping it same-origin means no CORS and no
+      // second host for the WebView to trust.
+      { source: "/system/providers", destination: `${backendOrigin}/system/providers` },
+    ];
+  },
+
+  // The APKs are static files under `public/downloads/`, which Next serves
+  // directly. Without the explicit type some browsers render the binary
+  // instead of saving it, and Android's installer never sees the file.
+  //
+  // `no-store` because the download page publishes each build's SHA-256 next to
+  // the link: a cached older APK whose checksum no longer matches the page is
+  // exactly the mismatch that makes a user think the download was tampered
+  // with.
+  async headers() {
+    return [
+      {
+        source: "/downloads/:file*.apk",
+        headers: [
+          { key: "Content-Type", value: "application/vnd.android.package-archive" },
+          { key: "Content-Disposition", value: "attachment" },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      },
     ];
   },
 };

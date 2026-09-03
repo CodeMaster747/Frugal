@@ -27,7 +27,11 @@ class CategorizationFeedback(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "categorization_feedback"
 
     transaction_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("transactions.id", ondelete="SET NULL")
+        ForeignKey(
+            "transactions.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
 
     #: The normalised form, not the raw narration -- the model is trained on
@@ -35,10 +39,16 @@ class CategorizationFeedback(UUIDMixin, TenantMixin, TimestampMixin, Base):
     merchant_normalized: Mapped[str] = mapped_column(String(255), nullable=False)
 
     predicted_category_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("categories.id", ondelete="SET NULL")
+        ForeignKey(
+            "categories.id",
+            ondelete="SET NULL",
+        ),
+        index=True,
     )
     corrected_category_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("categories.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     predicted_confidence: Mapped[Decimal | None] = mapped_column(CONFIDENCE)

@@ -12,7 +12,7 @@ receipt reads at roughly 60--70%:
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -25,6 +25,7 @@ from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError, UnprocessableError, ValidationError
 from app.core.jobs import Job, JobStatus
 from app.core.logging import get_logger
+from app.core.queue import PROMOTE_RECEIPT, dispatch
 from app.core.repository import BaseRepository
 from app.modules.finance.models import Transaction, TransactionKind, TransactionSource
 from app.modules.finance.schemas import TransactionCreate
@@ -69,6 +70,11 @@ class UploadTicket:
     receipt_id: uuid.UUID
     upload_url: str
     expires_in: int
+    #: Headers the browser must send with the PUT, supplied by the adapter.
+    #: Empty on S3; Azure requires `x-ms-blob-type`. Carried on the ticket so
+    #: the frontend spreads whatever it is given rather than branching on which
+    #: storage backend the deployment happens to run (ADR-004, ADR-010).
+    upload_headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,11 +123,28 @@ class ReceiptService:
 
         ttl = self.settings.presigned_url_ttl_seconds
         url = await self.store.presign_put(receipt.s3_key, content_type, ttl)
-        return UploadTicket(receipt_id=receipt.id, upload_url=url, expires_in=ttl)
+        return UploadTicket(
+            receipt_id=receipt.id,
+            upload_url=url,
+            expires_in=ttl,
+            upload_headers=dict(self.store.upload_headers),
+        )
 
     async def image_url(self, user_id: uuid.UUID, receipt_id: uuid.UUID) -> str:
+        """A read URL for the stored image.
+
+        The recorded content type is passed through so the storage service
+        serves the object under the type we *accepted*, not the type the bytes
+        claim. On Azure a SAS cannot constrain the upload itself, so this is
+        what stops a payload smuggled past the ticket check from being served
+        as a document from the storage origin.
+        """
         receipt = await self.receipts.get_or_404(user_id, receipt_id)
-        return await self.store.presign_get(receipt.s3_key, self.settings.presigned_url_ttl_seconds)
+        return await self.store.presign_get(
+            receipt.s3_key,
+            self.settings.presigned_url_ttl_seconds,
+            content_type=receipt.content_type,
+        )
 
     # --- processing -------------------------------------------------------
 
@@ -393,7 +416,132 @@ class ReceiptService:
         receipt.status = ReceiptStatus.COMMITTED.value
         await self.session.flush()
 
+        # Consider the receipt for the shared price graph (ADR-013), in the
+        # worker. Dispatched by name, so nothing here imports the task.
+        #
+        # Deliberately after the flush and deliberately not awaited: the user is
+        # recording their own purchase, and they are not waiting on a decision
+        # about whether other people get to see the price. A failed promotion
+        # must never surface as a failed commit.
+        dispatch(PROMOTE_RECEIPT, receipt_id=str(receipt.id), user_id=str(user_id))
+
         return outcome.transaction
+
+    async def promotion_input(
+        self, user_id: uuid.UUID, receipt_id: uuid.UUID
+    ) -> PromotionInput | None:
+        """What the price graph may see about a committed receipt.
+
+        Returns `None` for anything not committed. Never promote from
+        NEEDS_REVIEW: the whole basis of the rule is that a human confirmed the
+        merchant, the date and the total.
+        """
+        from app.modules.pricegraph.models import ReceiptFingerprint
+
+        receipt = await self.receipts.get(user_id, receipt_id)
+        if receipt is None or receipt.status != ReceiptStatus.COMMITTED.value:
+            return None
+
+        already = False
+        if receipt.fingerprint_id is not None:
+            fingerprint = await self.session.get(ReceiptFingerprint, receipt.fingerprint_id)
+            already = fingerprint is not None and fingerprint.sighting_count > 1
+
+        lines = [
+            PromotionLine(
+                id=item.id,
+                description=item.description,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                total_price=item.total_price,
+                confidence=item.confidence,
+            )
+            for item in receipt.line_items
+        ]
+        line_total = sum(
+            (item.total_price for item in receipt.line_items if item.total_price is not None),
+            Decimal(0),
+        )
+
+        return PromotionInput(
+            observed_on=receipt.date_extracted or utc_today(),
+            total=receipt.total_extracted,
+            line_total=line_total,
+            merchant_normalized=normalize_merchant(receipt.merchant_extracted),
+            gstin=self._field_value(receipt, FieldName.GSTIN),
+            pincode=self._field_value(receipt, FieldName.STORE_PINCODE),
+            lines=lines,
+            already_contributed=already,
+        )
+
+    @staticmethod
+    async def unpromoted_receipt_ids(
+        session: AsyncSession, user_id: uuid.UUID, *, since: date, limit: int = 25
+    ) -> list[uuid.UUID]:
+        """Committed receipts this user has that contributed nothing.
+
+        A `LEFT JOIN ... IS NULL` rather than a status column: "was this
+        promoted" is a question about whether a `receipt_promotions` row exists,
+        and adding a second place to record it would be a second place for it to
+        be wrong.
+
+        Static because the retry task has no `ObjectStore` to build a service
+        with and needs none -- it is choosing candidates, not reading blobs.
+        """
+        from app.modules.pricegraph.models import ReceiptPromotion
+
+        stmt = (
+            select(Receipt.id)
+            .outerjoin(ReceiptPromotion, ReceiptPromotion.receipt_id == Receipt.id)
+            .where(
+                Receipt.user_id == user_id,
+                Receipt.status == ReceiptStatus.COMMITTED.value,
+                Receipt.deleted_at.is_(None),
+                Receipt.date_extracted >= since,
+                ReceiptPromotion.id.is_(None),
+            )
+            .order_by(Receipt.date_extracted.desc())
+            .limit(limit)
+        )
+        return list((await session.execute(stmt)).scalars().all())
+
+    @staticmethod
+    def _field_value(receipt: Receipt, name: FieldName) -> str | None:
+        """A human correction always wins, through `effective_value`."""
+        field = next((f for f in receipt.fields if f.field_name == name.value), None)
+        return field.effective_value if field is not None else None
+
+    async def record_promotion(
+        self,
+        *,
+        user_id: uuid.UUID,
+        receipt_id: uuid.UUID,
+        line_item_id: uuid.UUID,
+        observation_id: uuid.UUID,
+        points_awarded: int = 0,
+    ) -> None:
+        """The uploader's private record of what they contributed.
+
+        This is the join `price_observations` deliberately does not carry.
+
+        `points_awarded` is passed in rather than looked up: the award may have
+        been refused by the daily cap or already granted, and only the caller
+        knows which. It shipped unset for a milestone, so every contribution
+        reported 0 points to its own contributor -- a column written by nobody
+        and read by the API and the frontend.
+        """
+        from app.modules.pricegraph.models import ReceiptPromotion
+
+        self.session.add(
+            ReceiptPromotion(
+                user_id=user_id,
+                receipt_id=receipt_id,
+                receipt_line_item_id=line_item_id,
+                price_observation_id=observation_id,
+                points_awarded=points_awarded,
+            )
+        )
+        await self.session.flush()
 
     async def delete(self, user_id: uuid.UUID, receipt_id: uuid.UUID) -> None:
         """Remove the receipt and its image.
@@ -408,6 +556,38 @@ class ReceiptService:
 
         receipt.soft_delete()
         await self.session.flush()
+
+
+@dataclass(frozen=True, slots=True)
+class PromotionLine:
+    """One receipt line, as the promotion rule needs it."""
+
+    id: uuid.UUID
+    description: str | None
+    quantity: Decimal | None
+    unit_price: Decimal | None
+    total_price: Decimal | None
+    confidence: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class PromotionInput:
+    """Everything the price graph may see about one committed receipt.
+
+    Deliberately a projection rather than the ORM object. What is *absent* is
+    the point: no `s3_key`, no `raw_text`, no bounding boxes, no payment method.
+    A caller cannot leak a field it was never handed, which is a stronger
+    guarantee than a caller choosing not to read one.
+    """
+
+    observed_on: date
+    total: Decimal | None
+    line_total: Decimal
+    merchant_normalized: str | None
+    gstin: str | None
+    pincode: str | None
+    lines: list[PromotionLine]
+    already_contributed: bool
 
 
 # --- value helpers ---------------------------------------------------------
