@@ -65,15 +65,27 @@ class PersonalizationService:
     # -- health ------------------------------------------------------------
 
     async def health(self) -> bool:
-        """Whether the second database answers.
+        """Whether the second database answers *and* has been migrated.
 
         Exists so `app/api/system.py` can report readiness without importing
         `core/signals_database` -- api -> modules is a permitted direction and
         api -> the engine module is not, which is the whole shape of the
         `the-signals-database-has-one-owner` contract.
+
+        Queries a real table rather than `select(1)`. Connectivity alone is not
+        readiness here: a configured-but-unmigrated database answers `select(1)`
+        perfectly and then 500s on the first request that touches a table. CI
+        ran in exactly that state -- `SIGNALS_DATABASE_URL` set, the database
+        created by `init-test-db.sql`, the migrations never applied -- and this
+        probe reported it healthy while `GET /personalization/profile` failed
+        every time. A probe that cannot see the difference is not a probe.
+
+        Never 503s the process: `readiness()` excludes personalization from that
+        decision on purpose, so a false here degrades one feature's reported
+        status and nothing else.
         """
         try:
-            await self.signals.execute(select(1))
+            await self.signals.execute(select(SignalProfile.subject_id).limit(1))
         except Exception:
             return False
         return True
