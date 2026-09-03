@@ -1978,6 +1978,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pricegraph/stores/{store_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm a shop is really there
+         * @description Vouch for a pinned shop.
+         *
+         *     Two distinct confirmers clear its "not yet confirmed" banner and pay
+         *     whoever placed the pin. The confirmer is not paid: clicking "yes" would
+         *     otherwise be the cheapest contribution in the system, and there is nothing
+         *     behind a click to verify.
+         */
+        post: operations["confirm_store_api_v1_pricegraph_stores__store_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/merge-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Item pairs that might be one product
+         * @description Layer 3 of item matching: the pairs the machine will not decide alone.
+         *
+         *     Trigram similarity is not transitive, so auto-merge may only ever attach an
+         *     alias to an existing canonical. Anything canonical-to-canonical waits here.
+         *     Until now it waited forever -- rows went in and nothing read them.
+         */
+        get: operations["merge_candidates_api_v1_pricegraph_merge_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/merge-candidates/{candidate_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** These are one product */
+        post: operations["confirm_merge_api_v1_pricegraph_merge_candidates__candidate_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricegraph/merge-candidates/{candidate_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * These are different products
+         * @description Rejecting is as valuable as confirming, and it is permanent.
+         *
+         *     `_propose_merge` skips a pair that already has a row, so a rejected pair is
+         *     never proposed again -- which is what stops the queue re-asking the same
+         *     question every time somebody buys the item.
+         */
+        post: operations["reject_merge_api_v1_pricegraph_merge_candidates__candidate_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricegraph/me/contributions": {
         parameters: {
             query?: never;
@@ -2100,7 +2190,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Reports for a store */
+        /**
+         * Reports for a store
+         * @description Readable signed out, and more useful signed in.
+         *
+         *     `mine` and `voted` were hardcoded false here, so a signed-in user reading
+         *     the store sheet saw every control in the wrong state -- their own report
+         *     offered them a confirm button, and an upvote they had already cast looked
+         *     uncast. The endpoint stays open; it just resolves the caller when there is
+         *     one.
+         */
         get: operations["list_reports_api_v1_community_reports_get"];
         put?: never;
         /**
@@ -3500,6 +3599,20 @@ export interface components {
             report_count: number;
             /** Headline */
             headline?: string | null;
+        };
+        /** MergeCandidateOut */
+        MergeCandidateOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Left Name */
+            left_name: string;
+            /** Right Name */
+            right_name: string;
+            /** Similarity */
+            similarity: string;
         };
         /** MoneyOut */
         MoneyOut: {
@@ -8208,6 +8321,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoreOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_store_api_v1_pricegraph_stores__store_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_candidates_api_v1_pricegraph_merge_candidates_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergeCandidateOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_merge_api_v1_pricegraph_merge_candidates__candidate_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_merge_api_v1_pricegraph_merge_candidates__candidate_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
