@@ -2,20 +2,15 @@
 
 import {
   ArrowLeftRight,
-  Bell,
   Bookmark,
-  Coins,
-  FlaskConical,
   HandCoins,
   HeartPulse,
   LayoutDashboard,
   LogOut,
   Map as MapIcon,
-  MessageSquare,
   Receipt,
   Settings,
   ShoppingBag,
-  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -29,10 +24,14 @@ import { cn } from "@/lib/utils";
 /**
  * The application shell's navigation.
  *
- * Nine destinations in a flat horizontal bar was past what the pattern holds --
- * the labels were breaking mid-word and the whole nav scrolled sideways. Grouping
- * is what makes nine legible: three short lists read faster than one long one,
- * and the group names say why the items belong together.
+ * **Seven destinations, not thirteen.** Grouping bought legibility for a while,
+ * but a sidebar is a statement about what the product is for, and thirteen
+ * entries said "everything, equally". Six were cut in M20 -- bank messages,
+ * alerts, points, add-a-shop, forecast, and the what-if simulator. None of them
+ * were deleted: each now sits as a button in the header of the page it belongs
+ * to, one click from where you would already be. That is the test a destination
+ * has to pass to be here -- somewhere you *go*, rather than somewhere you end up
+ * on the way through something else.
  *
  * Nav lives in a data array rather than in markup so that the sidebar, the
  * collapsed rail, and the mobile tab bar cannot drift apart -- all three render
@@ -54,34 +53,35 @@ interface NavGroup {
 const NAV: NavGroup[] = [
   {
     items: [
+      // First, and the only route here that is `/`. The map is what the app
+      // opens on, so the way back to it has to be visible from every screen
+      // inside the shell -- the mobile tab bar always had this and the sidebar
+      // did not, which left desktop users with no way out of the dashboard
+      // short of a browser gesture.
+      { href: "/", label: "Map", Icon: MapIcon },
       { href: "/dashboard", label: "Overview", Icon: LayoutDashboard },
+      // Bank messages live in this page's header: they are an import surface
+      // for the ledger, not a place of their own.
       { href: "/transactions", label: "Transactions", Icon: ArrowLeftRight },
-      { href: "/transactions/sms", label: "Bank messages", Icon: MessageSquare },
       { href: "/receipts", label: "Receipts", Icon: Receipt },
     ],
   },
   {
     name: "Insights",
+    // Forecast and the what-if simulator hang off Health, which is the page
+    // you land on when you want to know how you are doing.
     items: [
       { href: "/health", label: "Health", Icon: HeartPulse },
-      { href: "/forecast", label: "Forecast", Icon: TrendingUp },
-      { href: "/simulator", label: "What if?", Icon: FlaskConical },
       { href: "/advisor", label: "Should I buy it?", Icon: ShoppingBag },
     ],
   },
   {
-    name: "Market",
+    // One group rather than a "Market" and a "Community" heading over a single
+    // row each -- a heading that labels one item is not doing any work.
+    name: "Market & community",
     items: [
       { href: "/watchlist", label: "Watchlist", Icon: Bookmark },
-      { href: "/alerts", label: "Alerts", Icon: Bell },
-    ],
-  },
-  {
-    name: "Community",
-    items: [
-      { href: "/contribute", label: "Add a shop", Icon: MapIcon },
       { href: "/contributions", label: "My contributions", Icon: HandCoins },
-      { href: "/points", label: "Points", Icon: Coins },
     ],
   },
 ];
@@ -107,13 +107,12 @@ const MOBILE_TABS: NavItem[] = [
 
 /**
  * Every destination matches its own subtree, which is what keeps Transactions
- * lit on `/transactions/import` and Receipts lit on `/receipts/[id]`.
+ * lit on `/transactions/import`, Receipts lit on `/receipts/[id]`, and Health
+ * lit while you are reading the forecast it links to.
  *
- * No route here is `/`. That was true when the root was the marketing page and
- * it is still true now that it is the map: the map is not a sidebar
- * destination, it is what the app opens on, and listing it would light up on
- * every prefix. The Map link below goes there explicitly and is compared
- * exactly.
+ * `/` is the exception and has to be, because every path starts with it: a
+ * prefix match would leave the Map row lit on every screen in the app. It is
+ * compared exactly instead.
  */
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";

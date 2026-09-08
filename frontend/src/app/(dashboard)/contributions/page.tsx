@@ -1,5 +1,7 @@
 "use client";
 
+import { Coins, MapPin } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -134,7 +136,27 @@ export default function ContributionsPage() {
 
   return (
     <>
-      <h1 className="type-title">My contributions</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="type-title">My contributions</h1>
+        {/* The community group, collapsed onto the page that is about it.
+         * Adding a shop is also the map's own button -- this is the second
+         * way in, for somebody who is already looking at what they have
+         * given. */}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/contribute">
+              <MapPin aria-hidden />
+              Add a shop
+            </Link>
+          </Button>
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/points">
+              <Coins aria-hidden />
+              Points
+            </Link>
+          </Button>
+        </div>
+      </div>
       <p className="mt-1 type-body text-ink-secondary">
         Everything you have added to the shared price graph, and how to take any of it back.
       </p>

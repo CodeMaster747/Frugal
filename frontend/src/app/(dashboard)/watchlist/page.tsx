@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellRing, Info, Search, TrendingDown, X } from "lucide-react";
+import { Bell, BellRing, Info, Search, TrendingDown, X } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { ChartContainer } from "@/components/charts/chart-container";
@@ -68,16 +69,27 @@ export default function WatchlistPage() {
             Track a price and we&rsquo;ll tell you when it drops. Checked once a day.
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => check.mutate()}
-          disabled={check.isPending}
-          data-testid="check-drops"
-        >
-          <TrendingDown aria-hidden />
-          {check.isPending ? "Checking…" : "Check now"}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => check.mutate()}
+            disabled={check.isPending}
+            data-testid="check-drops"
+          >
+            <TrendingDown aria-hidden />
+            {check.isPending ? "Checking…" : "Check now"}
+          </Button>
+          {/* The price drops this page finds are delivered as notifications,
+           * so the feed of them is one step from here rather than a sidebar
+           * row of its own. */}
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/alerts">
+              <Bell aria-hidden />
+              All alerts
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {unread.length > 0 && (

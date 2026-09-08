@@ -57,8 +57,14 @@ test.describe("Bank messages", () => {
     );
   });
 
-  test("the review page is reachable from the sidebar", async ({ page }) => {
+  // Reached from the transactions page, not the sidebar. The M20 nav trim cut
+  // this from the sidebar on the grounds that it is a *source* of transactions
+  // rather than a destination -- so it now sits in the header of the ledger it
+  // feeds. The property under test is unchanged and still worth holding: a user
+  // can get here without typing a URL.
+  test("the review page is reachable without typing a URL", async ({ page }) => {
     await signUp(page);
+    await page.goto("/transactions");
     await page.getByRole("link", { name: "Bank messages" }).first().click();
     await expect(page).toHaveURL(/\/transactions\/sms$/);
     await expect(page.getByRole("heading", { name: "Bank messages" })).toBeVisible();

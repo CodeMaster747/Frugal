@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { Bell } from "lucide-react";
 import Link from "next/link";
 
 import { ChartContainer, Legend } from "@/components/charts/chart-container";
@@ -71,9 +72,20 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="type-title">Overview</h1>
-        <Button variant="secondary" size="sm" asChild>
-          <Link href="/transactions">All transactions</Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {/* Alerts is the notification feed -- things worth interrupting you
+           * for -- which is a fact about the whole account rather than about
+           * any one screen. So it hangs off the account's summary. */}
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/alerts">
+              <Bell aria-hidden />
+              Alerts
+            </Link>
+          </Button>
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/transactions">All transactions</Link>
+          </Button>
+        </div>
       </div>
 
       {/* KPI row of stat tiles, not a grouped bar chart: these are four

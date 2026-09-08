@@ -10,9 +10,10 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Map as MapLibreMap, Marker } from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
 
 import { buildStyle, hasBasemap, registerProtocol } from "../basemap";
+import { GRATICULE_SOURCE, graticule } from "../graticule";
 import { MAX_SPAN_DEGREES, type Bounds, type MapPin } from "../api";
 
 /** Chennai. A first-load centre has to be somewhere, and this is the region the
@@ -20,6 +21,12 @@ import { MAX_SPAN_DEGREES, type Bounds, type MapPin } from "../api";
  *  box. Overridden immediately by device location when the user allows it. */
 const FALLBACK_CENTRE: [number, number] = [80.257, 13.0067];
 const FALLBACK_ZOOM = 13;
+
+/** Where a focused shop lands. The point of flying somewhere is being able to
+ *  see which corner the shop is on, and zoom 13 cannot show that. Past the
+ *  archive's maxzoom of 14, so MapLibre overzooms the z14 tile -- which is what
+ *  overzooming is for, and costs no extra request. */
+const FOCUS_ZOOM = 16;
 
 /** Below this the viewport exceeds the two-degree cap the API enforces, so
  *  panning would only produce 400s. */
@@ -31,9 +38,27 @@ interface Props {
   onSelect: (pin: MapPin) => void;
   onLongPress?: (lngLat: { lng: number; lat: number }) => void;
   selectedId?: string | null;
+  /** Where to put the camera once the map is up -- a shop somebody just added,
+   *  arriving through the URL.
+   *
+   *  Two numbers rather than one `{lng, lat}` object, deliberately: an object
+   *  literal from the parent is a fresh identity on every render, so the effect
+   *  below would re-fly on each one and fight the user's own panning.
+   *  Primitives make that unrepresentable rather than merely avoided by a
+   *  `useMemo` somebody can later delete. */
+  focusLat?: number | null;
+  focusLon?: number | null;
 }
 
-export function PriceMap({ pins, onBoundsChange, onSelect, onLongPress, selectedId }: Props) {
+export function PriceMap({
+  pins,
+  onBoundsChange,
+  onSelect,
+  onLongPress,
+  selectedId,
+  focusLat,
+  focusLon,
+}: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
   const markers = useRef<Map<string, Marker>>(new Map());
@@ -55,6 +80,27 @@ export function PriceMap({ pins, onBoundsChange, onSelect, onLongPress, selected
         minLon: b.getWest(),
         maxLon: b.getEast(),
       });
+
+      // The fallback grid is regenerated for whatever is now on screen. Only
+      // when there is no archive: with one, the style has no such source and
+      // `getSource` would return undefined.
+      if (hasBasemap()) return;
+      // `getSource` is generic over the source type rather than returning a
+      // discriminated union, so the type is named here. It can still be
+      // undefined -- during style reloads there is a window where the source
+      // does not exist yet -- which is why this is optional-chained.
+      const source = instance.getSource<GeoJSONSource>(GRATICULE_SOURCE);
+      source?.setData(
+        graticule(
+          {
+            north: b.getNorth(),
+            south: b.getSouth(),
+            east: b.getEast(),
+            west: b.getWest(),
+          },
+          instance.getZoom(),
+        ),
+      );
     },
     [onBoundsChange],
   );
@@ -85,6 +131,9 @@ export function PriceMap({ pins, onBoundsChange, onSelect, onLongPress, selected
       });
 
       instance.addControl(new maplibre.NavigationControl({ showCompass: false }), "top-right");
+      // Distance, stated. It earns its place either way, but it is what makes
+      // the no-archive grid readable as a map rather than as decoration.
+      instance.addControl(new maplibre.ScaleControl({ unit: "metric" }), "bottom-right");
       instance.addControl(
         new maplibre.GeolocateControl({
           positionOptions: { enableHighAccuracy: true },
@@ -121,6 +170,32 @@ export function PriceMap({ pins, onBoundsChange, onSelect, onLongPress, selected
     };
   }, [emitBounds, onLongPress]);
 
+  // Brings a shop somebody just added under the eye.
+  //
+  // Its own effect, and deliberately *not* folded into the one above. That
+  // effect's cleanup calls `map.current.remove()`, so any dependency added to
+  // it tears the map down and rebuilds it whenever the value changes -- which
+  // would turn "fly to the new shop" into "destroy the map and lose every
+  // marker".
+  //
+  // Keyed on `ready` rather than on `map.current`, because a ref is not
+  // reactive and this has to run when the map finishes loading. By the time
+  // `ready` is true the assignment above has happened -- that ordering is the
+  // invariant the comment there is protecting.
+  //
+  // Nothing here places a marker. The flight ends in `moveend`, which re-emits
+  // bounds and refetches the pins for wherever it landed; the new shop's own
+  // marker arrives with them.
+  useEffect(() => {
+    if (!ready || !map.current) return;
+    if (focusLat == null || focusLon == null) return;
+
+    // No `essential: true`: under prefers-reduced-motion MapLibre jumps instead
+    // of animating, which still ends at the shop. The destination is the
+    // requirement; the flight is decoration.
+    map.current.flyTo({ center: [focusLon, focusLat], zoom: FOCUS_ZOOM });
+  }, [ready, focusLat, focusLon]);
+
   // Markers are reconciled rather than rebuilt: clearing and re-adding on every
   // fetch makes the whole set flicker on each pan, and a map that flickers
   // looks broken even when it is right.
@@ -149,11 +224,32 @@ export function PriceMap({ pins, onBoundsChange, onSelect, onLongPress, selected
         element.type = "button";
         element.className = "price-pin";
         element.dataset.selected = String(selectedId === pin.store.id);
+        // An unconfirmed pin is one person's word that a shop is there, which
+        // is a different claim from an imported one. The store sheet has said
+        // so since M19; the map said nothing, so the two disagreed.
+        element.dataset.unconfirmed = String(!pin.store.confirmed);
         element.setAttribute(
           "aria-label",
           `${pin.store.name}${pin.headline ? `, ${pin.headline}` : ""}`,
         );
-        element.textContent = pin.price_count > 0 ? String(pin.price_count) : "·";
+
+        // The name, not just a count. A pin whose entire content was
+        // `price_count || "·"` made a shop somebody had just added
+        // indistinguishable from a speck of dust, and made a map full of pins
+        // unreadable without tapping every one of them. The count keeps its
+        // own slot so the two never run together.
+        const label = document.createElement("span");
+        label.className = "price-pin__name";
+        label.textContent = pin.store.name;
+        element.append(label);
+
+        if (pin.price_count > 0) {
+          const count = document.createElement("span");
+          count.className = "price-pin__count";
+          count.textContent = String(pin.price_count);
+          element.append(count);
+        }
+
         element.addEventListener("click", (event) => {
           event.stopPropagation();
           onSelect(pin);
@@ -182,10 +278,11 @@ export function PriceMap({ pins, onBoundsChange, onSelect, onLongPress, selected
     <div className="relative h-full w-full">
       <div ref={container} className="h-full w-full" />
       {!hasBasemap() && (
-        // Said out loud rather than left to look like a broken map. The pins
-        // are the product; the basemap is context for them.
+        // Said out loud rather than left to look like a broken map. The grid
+        // behind the pins is real coordinates, not streets, and the difference
+        // matters to anybody trying to find a shop by eye.
         <p className="pointer-events-none absolute bottom-3 left-3 rounded-control bg-surface/90 px-2 py-1 type-meta text-ink-muted">
-          Basemap not configured — pins only.
+          No basemap here — showing a coordinate grid and pins.
         </p>
       )}
     </div>

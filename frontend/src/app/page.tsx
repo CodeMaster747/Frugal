@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Info, MapPin as PinIcon, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/auth-provider";
-import { fetchPins, type Bounds, type MapPin } from "@/features/map/api";
+import { fetchPins, fetchStore, type Bounds, type MapPin } from "@/features/map/api";
 import { PriceMap } from "@/features/map/components/price-map";
 import { StoreSheet } from "@/features/map/components/store-sheet";
 import { keys } from "@/lib/api/query-keys";
@@ -28,10 +29,23 @@ import { keys } from "@/lib/api/query-keys";
  * Because the Android APK is a WebView over the live site, this is also the
  * app's first screen the moment it deploys.
  */
-export default function MapLandingPage() {
+function MapLandingView() {
   const { status } = useAuth();
+  const params = useSearchParams();
   const [bounds, setBounds] = useState<Bounds | null>(null);
   const [selected, setSelected] = useState<MapPin | null>(null);
+  // Remembered here rather than stripped out of the URL. A `router.replace`
+  // would re-render mid-flight and cancel the camera animation, and it would
+  // make the back button reopen a sheet the user had just closed.
+  const [dismissed, setDismissed] = useState<string | null>(null);
+
+  // `?store=` is how "add a shop" hands the map its answer. The coordinates
+  // ride along so the camera can start moving on the first render rather than
+  // waiting for the store fetch -- and so it still moves if that request is
+  // slow.
+  const focusId = params.get("store");
+  const focusLat = coordinate(params.get("lat"), 90);
+  const focusLon = coordinate(params.get("lon"), 180);
 
   const pins = useQuery({
     queryKey: bounds ? keys.map.pins(bounds) : ["map-pins", "idle"],
@@ -41,8 +55,39 @@ export default function MapLandingPage() {
     staleTime: 60_000,
   });
 
+  const focusStore = useQuery({
+    queryKey: keys.map.store(focusId ?? ""),
+    queryFn: () => fetchStore(focusId!),
+    enabled: focusId !== null && focusId !== dismissed,
+    staleTime: 60_000,
+  });
+
+  // `StoreSheet` takes a `MapPin`, and a shop that was just added is not in
+  // `pins` yet: the map has to fly, `moveend` has to land, bounds have to be
+  // re-emitted and the viewport query has to come back -- four async steps
+  // after the sheet should already be open. So synthesise one from the store
+  // and let the real pin replace it when it arrives.
+  //
+  // The synthesised counts are zero, and for a shop created seconds ago that is
+  // not a placeholder, it is the truth: a shop has no prices until somebody
+  // reports one.
+  const focused = useMemo<MapPin | null>(() => {
+    if (!focusId || focusId === dismissed) return null;
+    const fromPins = pins.data?.find((pin) => pin.store.id === focusId);
+    if (fromPins) return fromPins;
+    if (!focusStore.data) return null;
+    return { store: focusStore.data, price_count: 0, report_count: 0, headline: null };
+  }, [focusId, dismissed, pins.data, focusStore.data]);
+
+  // A pin the user tapped always wins over the one the URL asked for.
+  const sheet = selected ?? focused;
+
   const onBoundsChange = useCallback((next: Bounds) => setBounds(next), []);
   const onSelect = useCallback((pin: MapPin) => setSelected(pin), []);
+  const onCloseSheet = useCallback(() => {
+    setSelected(null);
+    setDismissed(focusId);
+  }, [focusId]);
 
   const found = pins.data?.length ?? 0;
 
@@ -65,7 +110,9 @@ export default function MapLandingPage() {
           pins={pins.data ?? []}
           onBoundsChange={onBoundsChange}
           onSelect={onSelect}
-          selectedId={selected?.store.id ?? null}
+          selectedId={sheet?.store.id ?? null}
+          focusLat={focusLat}
+          focusLon={focusLon}
         />
       </div>
 
@@ -75,7 +122,7 @@ export default function MapLandingPage() {
        * primary call to action disappears behind it on desktop. */}
       <header
         className={
-          selected
+          sheet
             ? "pointer-events-none absolute inset-x-0 top-0 z-10 p-3 md:pr-96"
             : "pointer-events-none absolute inset-x-0 top-0 z-10 p-3"
         }
@@ -128,7 +175,29 @@ export default function MapLandingPage() {
         </div>
       )}
 
-      {selected && <StoreSheet pin={selected} onClose={() => setSelected(null)} />}
+      {sheet && <StoreSheet pin={sheet} onClose={onCloseSheet} />}
     </div>
+  );
+}
+
+/**
+ * Coordinates arrive from a URL anybody can edit, so they become numbers only
+ * once they have been proved to be numbers. `flyTo` with a NaN centre throws
+ * inside MapLibre, which would take the whole map down over a typo.
+ */
+function coordinate(raw: string | null, limit: number): number | null {
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && Math.abs(value) <= limit ? value : null;
+}
+
+export default function MapLandingPage() {
+  // `useSearchParams` needs a Suspense boundary to keep the route statically
+  // renderable in the App Router. Not cosmetic: without one `next build` fails
+  // this page outright, and `make check-frontend` runs the build.
+  return (
+    <Suspense>
+      <MapLandingView />
+    </Suspense>
   );
 }
