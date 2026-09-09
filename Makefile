@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help up down logs build migrate migrate-signals revision revision-signals \
-	downgrade downgrade-signals seed shell test test-unit eval e2e \
+	downgrade downgrade-signals seed-demo reset-dev-data shell test test-unit eval e2e \
         lint format types check check-backend check-frontend clean frontend-dev frontend-install
 
 COMPOSE := docker compose
@@ -54,9 +54,17 @@ downgrade-signals: ## Roll back one personalization migration
 downgrade: ## Roll back one migration
 	$(API) alembic downgrade -1
 
-# There is no `seed` target: the system category taxonomy is seeded by
-# migration 0004, so `make migrate` is the only step. The target that used to be
-# here pointed at a module that never existed and failed whenever anyone ran it.
+# There is no `seed` target for reference data: the system category taxonomy is
+# seeded by migration 0004, so `make migrate` is the only step. The target that
+# used to be here pointed at a module that never existed and failed whenever
+# anyone ran it.
+#
+# `seed-demo` below is a different thing and does not replace it: it fills the
+# *price graph* with invented shops and prices so the map at `/` has something
+# on it. Without it a fresh database renders a correct, empty, and
+# indistinguishable-from-broken map.
+seed-demo: ## Put invented shops and prices on the map (local database only)
+	$(API) python -m scripts.seed_demo_pricegraph
 
 # Every E2E run signs up ~80 users and seeds ~300 transactions each, and never
 # cleans up. Left alone the dev database grows without bound, which makes the

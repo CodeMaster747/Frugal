@@ -1,7 +1,7 @@
 "use client";
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Sparkles, Trash2, Upload } from "lucide-react";
+import { MessageSquare, Plus, Sparkles, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -69,6 +69,15 @@ function TransactionsView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="type-title">Transactions</h1>
         <div className="flex gap-2">
+          {/* Both ways into this ledger sit on the ledger, which is where you
+           * look for them. Bank messages had a sidebar row of its own until
+           * M20; it is a source of transactions, not a place to be. */}
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/transactions/sms">
+              <MessageSquare aria-hidden />
+              Bank messages
+            </Link>
+          </Button>
           <Button variant="secondary" size="sm" asChild>
             <Link href="/transactions/import">
               <Upload aria-hidden />

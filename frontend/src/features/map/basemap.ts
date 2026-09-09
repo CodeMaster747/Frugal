@@ -27,6 +27,8 @@
 
 import type { AddProtocolAction, StyleSpecification } from "maplibre-gl";
 
+import { EMPTY_GRATICULE, GRATICULE_SOURCE } from "./graticule";
+
 export const BASEMAP_URL = process.env.NEXT_PUBLIC_BASEMAP_URL ?? "";
 
 /** Must match `--maxzoom` in `scripts/build-basemap.sh`. */
@@ -81,6 +83,8 @@ const LIGHT = {
   road: "#ffffff",
   roadCase: "#e0ddd7",
   boundary: "#d5d0c9",
+  grid: "#dedbd5",
+  gridMajor: "#c9c5be",
 };
 
 const DARK = {
@@ -91,20 +95,46 @@ const DARK = {
   road: "#2b2b2b",
   roadCase: "#1a1a1a",
   boundary: "#333333",
+  grid: "#232323",
+  gridMajor: "#333333",
 };
 
 export function buildStyle(dark: boolean): StyleSpecification {
   const c = dark ? DARK : LIGHT;
 
   if (!hasBasemap()) {
-    // No archive configured. A single background layer, so the map still pans,
-    // zooms, and draws pins. This is a supported state, not a broken one: the
-    // pins are the product and the basemap is context for them.
+    // No archive configured. A supported state -- the pins are the product and
+    // the basemap is context for them -- but a bare background layer made it
+    // look like a failed one: nothing moved on pan, nothing grew on zoom, and
+    // a correct map was indistinguishable from a broken one.
+    //
+    // So the fallback draws a coordinate grid, fed per viewport by the map
+    // component. Real meridians and parallels rather than invented geography:
+    // a made-up coastline would be a lie told in the one place a user is
+    // entitled to trust what they see. See `graticule.ts`.
     return {
       version: 8,
-      sources: {},
+      sources: {
+        [GRATICULE_SOURCE]: { type: "geojson", data: EMPTY_GRATICULE },
+      },
       layers: [
         { id: "background", type: "background", paint: { "background-color": c.earth } },
+        {
+          id: "graticule",
+          type: "line",
+          source: GRATICULE_SOURCE,
+          filter: ["!", ["get", "major"]],
+          paint: { "line-color": c.grid, "line-width": 1 },
+        },
+        // Every tenth line, heavier. A uniform mesh gives no sense of scale;
+        // a repeating heavier line is what you count against.
+        {
+          id: "graticule-major",
+          type: "line",
+          source: GRATICULE_SOURCE,
+          filter: ["get", "major"],
+          paint: { "line-color": c.gridMajor, "line-width": 1.25 },
+        },
       ],
     };
   }

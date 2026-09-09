@@ -32,6 +32,12 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...and the example is one of those opt-ins. The root .gitignore already
+# negates this, but the nearest file wins, so a bare `.env*` here quietly
+# un-tracked the one file that documents how to configure the frontend. That is
+# how NEXT_PUBLIC_BASEMAP_URL came to be documented nowhere and the map came to
+# render as a blank rectangle for want of one line.
+!.env.local.example
 
 # vercel
 .vercel

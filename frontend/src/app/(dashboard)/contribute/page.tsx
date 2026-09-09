@@ -65,9 +65,22 @@ export default function ContributePage() {
         pincode: pincode.trim() || undefined,
         note: note.trim() || undefined,
       }),
-    onSuccess: async () => {
+    // Takes the created store, because its id and coordinates are the whole
+    // reason the map can open on the shop that was just added rather than on
+    // wherever the map happens to boot. Until M20 this pushed a bare `/`, and
+    // a shop pinned outside the default viewport was simply never seen again.
+    onSuccess: async (store) => {
       await queryClient.invalidateQueries({ queryKey: ["map-pins"] });
-      router.push("/");
+
+      const query = new URLSearchParams({ store: store.id });
+      // `lon`, not `lng`, matching the API's own vocabulary. Already
+      // fixed-point strings on the wire (ADR-003), so they are passed through
+      // rather than reformatted.
+      if (store.latitude && store.longitude) {
+        query.set("lat", store.latitude);
+        query.set("lon", store.longitude);
+      }
+      router.push(`/?${query}`);
     },
   });
 

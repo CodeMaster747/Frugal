@@ -356,11 +356,14 @@
  * screen, and a div with a click handler is unreachable by keyboard.
  */
 .price-pin {
-  display: grid;
-  place-items: center;
-  min-width: 1.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
   height: 1.75rem;
-  padding: 0 0.375rem;
+  /* Capped rather than free: a long shop name would otherwise stretch a pin
+   * across half the viewport and cover the shops it is competing with. */
+  max-width: 11rem;
+  padding: 0 0.5rem;
   border: 1px solid var(--color-hairline);
   border-radius: var(--radius-card);
   background: var(--color-surface);
@@ -369,7 +372,36 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
+  /* The pins sit over a basemap that is deliberately low-contrast, so they
+   * need their own separation from it rather than borrowing the map's. */
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
   transition: transform var(--default-transition-duration) var(--ease-standard);
+}
+
+.price-pin__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The count reads as a badge on the name rather than a second word: it is a
+ * different kind of fact, and at 12px the only thing separating them otherwise
+ * would be a space. */
+.price-pin__count {
+  flex-shrink: 0;
+  min-width: 1.125rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+  color: var(--color-ink-secondary);
+  text-align: center;
+}
+
+/* Dashed, because the claim itself is provisional -- one person has said this
+ * shop is here and nobody has agreed yet. Deliberately not a colour change:
+ * colour would read as a category, and this is a confidence level. */
+.price-pin[data-unconfirmed="true"] {
+  border-style: dashed;
 }
 
 .price-pin:hover {
@@ -388,6 +420,16 @@
   background: var(--color-brand);
   border-color: var(--color-brand);
   color: var(--color-brand-contrast);
+  /* Above its neighbours: a selected pin that a nearby pin overlaps is a
+   * selected pin the user cannot read. */
+  z-index: 1;
+}
+
+/* Inherit, so the badge follows the pin into the selected state instead of
+ * keeping a surface colour that reads as a hole punched in the brand fill. */
+.price-pin[data-selected="true"] .price-pin__count {
+  background: rgb(255 255 255 / 0.22);
+  color: inherit;
 }
 
 @media (prefers-reduced-motion: reduce) {

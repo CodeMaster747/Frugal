@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { keys } from "@/lib/api/query-keys";
-import { RefreshCw } from "lucide-react";
+import { FlaskConical, RefreshCw, TrendingUp } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { ExplanationPanel } from "@/components/explanation-panel";
@@ -56,16 +57,33 @@ export default function HealthPage() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="type-title">Financial health</h1>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => refresh.mutate()}
-          disabled={refresh.isPending}
-          data-testid="refresh-insights"
-        >
-          <RefreshCw aria-hidden className={refresh.isPending ? "animate-spin" : ""} />
-          {refresh.isPending ? "Checking…" : "Check for new insights"}
-        </Button>
+        {/* This page is where the Insights group lands, so the two projections
+         * that used to have sidebar rows of their own hang off it: you ask how
+         * you are doing, then what happens next, then what would change it. */}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/forecast">
+              <TrendingUp aria-hidden />
+              Forecast
+            </Link>
+          </Button>
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/simulator">
+              <FlaskConical aria-hidden />
+              What if?
+            </Link>
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+            data-testid="refresh-insights"
+          >
+            <RefreshCw aria-hidden className={refresh.isPending ? "animate-spin" : ""} />
+            {refresh.isPending ? "Checking…" : "Check for new insights"}
+          </Button>
+        </div>
       </div>
 
       {health.isPending ? (

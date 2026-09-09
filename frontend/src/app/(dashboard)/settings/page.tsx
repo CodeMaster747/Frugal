@@ -1,5 +1,7 @@
 "use client";
 
+import { Bell } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -51,7 +53,19 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-lg space-y-8">
-      <h1 className="type-title">Settings</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="type-title">Settings</h1>
+        {/* Alerts also sits on Overview, but Overview swaps itself for an empty
+         * state until there is data -- and the first thing a new account may
+         * want is to turn notifications down. This header always renders, and
+         * what to be interrupted about is a preference like any other here. */}
+        <Button variant="secondary" size="sm" asChild>
+          <Link href="/alerts">
+            <Bell aria-hidden />
+            Alerts
+          </Link>
+        </Button>
+      </div>
 
       <Section title="Profile">
         <div className="space-y-4">
