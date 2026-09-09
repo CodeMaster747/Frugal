@@ -110,4 +110,42 @@ Self-hosting the basemap is free for any use. The sponsorship Protomaps asks for
 | OpenStreetMap's standard raster tiles | No key and free, and its usage policy forbids exactly this: heavy or app use. Fine for a prototype, not for something asking people to install it. |
 | Protomaps' hosted tile API | Free for noncommercial use only, and it reintroduces the third party the file removes. |
 | A tile server (tileserver-gl, Martin) | A process to run, a database or mbtiles to manage, and memory to spare on a 1 GB box. A static file needs none of them. |
-| Ship the archive in `frontend/public/` | Render's build would carry megabytes on every deploy, and the frontend redeploys far more often than the map data changes. |
+| Ship the archive in `frontend/public/` | Render's build would carry megabytes on every deploy, and the frontend redeploys far more often than the map data changes. **Reversed — see the amendment below.** |
+
+---
+
+## Amendment, 2026-09-09 — the archive ships with the frontend
+
+**Status:** Accepted · Supersedes the last row of *Alternatives rejected*, not the decision itself.
+
+The decision above is unchanged: the basemap is still a file we host and not an API we call, and the
+Caddyfile still serves `/basemap/*` with byte ranges. What changed is *which* box is running.
+
+**There is no API host.** The AWS account paused exactly as
+[ACCOUNT-MIGRATION.md](../../infra/aws/ACCOUNT-MIGRATION.md) said it would, the EC2 instance is gone,
+`terraform.tfstate` holds no resources, and `frugal-api.duckdns.org` does not resolve. The Render
+frontend is what is actually serving users. So "copy it to `/opt/frugal/basemap/`" is not a step
+anybody can perform, and production had no basemap at all — a coordinate grid and pins, which is the
+supported fallback but not the product.
+
+**So the rejected option is taken.** `frontend/public/basemap.pmtiles` is committed, `.gitignore`
+carries a single negation for that one path, and `NEXT_PUBLIC_BASEMAP_URL` is `/basemap.pmtiles`.
+
+Two things make this cheaper than the row above assumed:
+
+- **Render honours byte ranges on `public/`** — verified against the live site, `206` with a
+  `content-range`. That is the entire requirement; PMTiles fetches a few hundred KB of the archive
+  per session exactly as it does from Caddy.
+- **Same-origin.** The CORS headers the Caddyfile sets up so carefully are not in play at all, which
+  removes the failure mode ADR-014 called load-bearing: an archive that dies at the preflight and
+  silently falls back to a plain background.
+
+**The cost is real and accepted.** 7.2 MB enters git history once, and every Render build now carries
+it. The original objection — that the frontend redeploys far more often than the map data changes —
+stands; it is simply worth less than a production map that works. Rebuilding for a new city is still
+`scripts/build-basemap.sh` with a different bbox, now followed by a commit rather than an `scp`.
+
+**When the API host returns**, `/opt/frugal/basemap` is still the better home: it decouples map data
+from frontend deploys and is what the Caddyfile is already written for. Moving back is deleting the
+negation from `.gitignore`, deleting the file, and setting `NEXT_PUBLIC_BASEMAP_URL` to the absolute
+URL again. Nothing in the frontend code distinguishes the two — it reads one variable either way.

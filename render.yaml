@@ -45,3 +45,22 @@ services:
       #   e.g. https://frugal-web.onrender.com
       - key: NEXT_PUBLIC_API_URL
         sync: false
+
+      # The vector basemap (ADR-014, amended). Root-relative, because the
+      # archive now ships in public/ and this service serves it: Render answers
+      # a range request with a 206 and a content-range, which is the only thing
+      # PMTiles needs. Same-origin, so no preflight and no CORS to configure.
+      #
+      # Unset, the map still renders every pin over a coordinate grid and says
+      # so on screen -- a supported state, and what production looked like
+      # before this. It is not the one you want.
+      #
+      # Inlined at build time like NEXT_PUBLIC_API_URL above, so changing it
+      # needs a redeploy rather than a restart.
+      - key: NEXT_PUBLIC_BASEMAP_URL
+        value: /basemap.pmtiles
+
+      # Must equal the --maxzoom the archive was built with, or MapLibre asks
+      # for tiles it does not contain instead of overzooming the ones it does.
+      - key: NEXT_PUBLIC_BASEMAP_MAXZOOM
+        value: "14"
