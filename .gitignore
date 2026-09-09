@@ -92,7 +92,23 @@ infra/aws/terraform/terraform.tfvars
 # is committed and gated; this intermediate is not.
 backend/openapi.json
 
-# The basemap archive. Built by `scripts/build-basemap.sh` and deployed to the
-# API host, never committed: it is a derived artefact of an OpenStreetMap
-# extract, it is megabytes, and it is rebuilt rather than versioned.
+# The basemap archive. Built by `scripts/build-basemap.sh`. Derived, megabytes,
+# and rebuilt rather than versioned -- so it stays out of git by default.
 *.pmtiles
+
+# The one exception, and it is a deployment fact rather than a change of mind
+# (ADR-014 amended). That ADR assumed the archive would be served from the API
+# host, which Caddy still does at /basemap/*. There is no API host at present:
+# the AWS account paused as ACCOUNT-MIGRATION.md says it would, the EC2 instance
+# is gone, and Terraform holds no resources. The frontend on Render is what is
+# actually running.
+#
+# Render serves public/ with byte ranges -- verified, 206 with a content-range
+# -- which is the only thing PMTiles needs. So shipping this one file with the
+# frontend is what puts a real map in production, and it is same-origin, so the
+# CORS the Caddyfile carefully sets up is not even in play.
+#
+# 7.2 MB in history, once, for a file that changes when a city is added. When
+# the API host comes back, the better home is still /opt/frugal/basemap -- at
+# which point this line goes and NEXT_PUBLIC_BASEMAP_URL becomes absolute again.
+!frontend/public/basemap.pmtiles
