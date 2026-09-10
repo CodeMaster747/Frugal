@@ -65,22 +65,48 @@ answering.
 ## 2. What this deployment costs
 
 Measured against a $100 credit that has to last twelve months — a budget of
-**$8.33/month**.
+**$8.33/month**. Prices are list, `centralindia`, pulled from the Azure Retail
+Prices API rather than estimated:
 
 | Resource | Monthly | Note |
 |---|---|---|
-| `Standard_B1s` VM (1 vCPU / 1 GB) | ~$7.59 | The largest line, and may be covered — see below |
-| Standard SSD OS disk, 32 GiB (E4) | ~$2.40 | 30 GiB would bill as 32 anyway |
+| `Standard_B1s` VM (1 vCPU / 1 GB) | ~$8.18 | The largest line, and may be covered — see below |
+| Standard SSD OS disk, 32 GiB (E4) | ~$2.64 | 30 GiB would bill as 32 anyway |
 | Standard static public IP | ~$3.65 | Unavoidable; Basic SKU was retired Sept 2025 |
 | Blob Storage, hot LRS | ~$0.02/GB | Receipts expire at 90 days |
 | Log Analytics | $0 | 5 GB/month ingestion is free, and `daily_quota_gb = 1` caps it |
 | Azure Monitor alerts | $0 | Metric alerts and two log queries are within the free allowance |
 | Bandwidth out | $0 | First 100 GB/month is free |
-| **Total** | **~$13.65** | **Over budget at list price** |
+| **Total** | **~$14.47** | **Over budget at list price** |
 
 That number is above $8.33, and the resolution is the free-services allowance:
 Azure grants **750 hours/month of B1s Linux for the first 12 months**, which
-covers the VM entirely and brings the running total to roughly **$6/month**.
+covers the VM entirely and brings the running total to roughly **$6.29/month**.
+
+### The floor, and why nothing gets under $4
+
+Worth stating plainly, because it is the question everyone asks second: **the
+static public IP alone is $3.65/month**, and Standard is the only SKU Azure will
+still create. Add the smallest OS disk an Ubuntu-plus-Docker box can boot from
+and the floor for an always-on VM here is around **$5/month**, even with the VM
+itself free. Going below that means having no public IP — which is the argument
+for Container Apps, where ingress, TLS and a custom domain are included and the
+consumption free grant covers a low-traffic API outright.
+
+### This table once described a machine that was never deployed
+
+An earlier revision priced a `Standard_B1s` and concluded ~$6/month. The
+deployment actually ran a **`Standard_B2ts_v2` at $14.89/month** — because
+`variables.tf` defaulted to that size while its own docstring argued for B1s,
+and `terraform.tfvars` never overrode it. No free-services grant applies to a v2
+size, so the "the VM is covered" line above was false for what was running. It
+spent roughly $7 of the credit without ever serving a request, and the
+deployment was torn down rather than repaired (see §7).
+
+The lesson is the one this document already tries to teach, arriving from an
+unexpected direction: **the number that matters is the credit balance, not this
+table.** A cost model in a file cannot notice that the infrastructure disagrees
+with it.
 
 **Verify this rather than believing this table.** The free-services catalogue is
 Microsoft's to change, and whether every item applies to the student offer
@@ -233,3 +259,35 @@ The second command is not optional ceremony. It restores into a throwaway
 container and counts the rows, and it exits non-zero if the dump restores
 cleanly but empty — which is exactly what a backup pointed at the wrong database
 looks like at every other step.
+
+---
+
+## 7. Current status — torn down
+
+**As of 2026-09-10 there is no Azure deployment.** `terraform destroy` removed all
+26 resources including the `frugal-rg` resource group, and the subscription now
+carries nothing for this project. Running cost is **$0.00/month**.
+
+Why, in one paragraph: the VM ran for eleven days at $14.89/month (the wrong-size
+default described in §2) and never served a request — no DNS was pointed at it,
+`/opt/frugal/.env` was never created, and `deploy.sh` never ran. Stopping it left
+the OS disk and the static public IP still billing $6.29/month for a machine
+nobody could reach. Since the box is entirely reproducible from `terraform apply`
+plus `cloud-init.sh` plus `deploy.sh`, keeping it stopped was paying to preserve
+something a command rebuilds in minutes — and one stray `terraform apply` would
+have put the whole $21/month back.
+
+Nothing was lost. The `receipts` container held zero blobs; Postgres is on Neon,
+Redis on Upstash, and the frontend on Render, none of which are Azure. The
+untracked `terraform.tfvars` is deliberately left on disk, because it is what a
+future `terraform apply` needs.
+
+**The intended successor is Azure Container Apps**, on the Consumption plan with
+scale-to-zero: the free grant (180k vCPU-seconds, 360k GiB-seconds, 2M requests
+per month) covers a portfolio-traffic API, and ingress, TLS and custom domains
+are included — which is what removes the $3.65 public IP that §2 identifies as
+the floor. That migration is not yet built.
+
+Everything in `infra/azure/` remains accurate as *instructions*; it describes a
+deployment that can be recreated, not one that is currently running.
+
