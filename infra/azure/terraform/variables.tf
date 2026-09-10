@@ -50,9 +50,18 @@ variable "vm_size" {
 
     B1s is 1 vCPU / 1 GB -- the same shape as the t3.micro this replaces, which
     the 2 GB swap in cloud-init.yaml was already sized against.
+
+    **The default below used to be `Standard_B2ts_v2`, and the paragraph above
+    was written about a machine that was never deployed.** Nothing overrode it
+    in terraform.tfvars, so the warning sat directly on top of a default that
+    contradicted it, and the deployment ran at $14.89/month against a $100
+    credit -- measured list price for centralindia, where the grant that covers
+    B1s does not apply to a v2 size at all. It spent roughly $7 without ever
+    serving a request. The warning is load-bearing; the default now agrees with
+    it.
   EOT
   type        = string
-  default     = "Standard_B2ts_v2"
+  default     = "Standard_B1s"
 
   validation {
     condition     = contains(["Standard_B2ts_v2", "Standard_B2ls_v2", "Standard_B1s", "Standard_B1ms", "Standard_B2ats_v2"], var.vm_size)

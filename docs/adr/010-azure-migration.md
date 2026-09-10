@@ -1,6 +1,6 @@
 # ADR-010 — Deploy on Azure for Students, with a second object-storage adapter
 
-**Status:** Accepted · **Date:** 2026-08-22
+**Status:** Accepted · **Date:** 2026-08-22 · **Deployment status:** torn down 2026-09-10, see the amendment at the end
 
 ## Context
 
@@ -145,3 +145,40 @@ services, more cost, and a rewrite of a deployment that already works.
 **Keep receipts on Cloudflare R2 and change no code.** The `s3.py` adapter already speaks R2, so this
 was free. Rejected because it leaves the project's storage on a third provider for no benefit beyond
 avoiding ~150 lines, and R2 remains available as a fallback precisely because the port makes it one.
+
+---
+
+## Amendment, 2026-09-10 — the deployment is torn down; the decision is not
+
+**The decision above stands unchanged.** Azure is still the right host for this
+project, for exactly the reason recorded here: twelve renewable months against
+AWS's hard six, with neither able to produce an invoice. What follows is a change
+of *status*, not of direction.
+
+**The VM is gone.** `terraform destroy` removed all 26 resources including the
+resource group. It had run for eleven days without ever serving a request — no
+DNS, no `/opt/frugal/.env`, `deploy.sh` never executed — while billing $14.89 a
+month, because `variables.tf` defaulted to `Standard_B2ts_v2` while its own
+docstring argued for the `Standard_B1s` this ADR specifies. That default is now
+corrected. Deallocating the VM left the disk and static IP still costing $6.29 a
+month for a machine nobody could reach, so it was destroyed instead.
+
+**What this ADR got right, and it is the part worth keeping:** the boundary. The
+table above says Postgres stays on Neon, the frontend on Render, and Redis off
+the managed-service bill. Because of that, destroying the entire Azure footprint
+cost nothing — no data moved, no migration window existed, the receipts container
+held zero blobs, and the Render frontend did not notice. A modular monolith with
+managed state outside the compute host meant "delete the whole cloud deployment"
+was a ten-minute operation with no user-visible consequence. That is the property
+this ADR was arguing for, tested in the least expected way.
+
+**The successor is Azure Container Apps**, not another VM. Consumption plan,
+scale-to-zero, with the free monthly grant covering a portfolio-traffic API;
+ingress, TLS and custom domains are included, which removes the $3.65/month
+static public IP that is otherwise the hard floor on any always-on VM here. The
+Blob adapter, the managed-identity approach, and the Log Analytics wiring this
+ADR introduced all carry over unchanged — only the compute host differs.
+
+`infra/azure/` remains accurate as instructions for recreating the deployment.
+See [COST-SAFETY.md §7](../../infra/azure/COST-SAFETY.md) for the current status.
+

@@ -1,5 +1,12 @@
 # Runbook
 
+> **There is no deployment right now.** It was torn down on 2026-09-10 — see
+> [COST-SAFETY.md §7](COST-SAFETY.md) for why, and
+> [ADR-010](../../docs/adr/010-azure-migration.md) for what replaces it. Everything
+> below is still correct as *instructions*: section 1 recreates the stack from
+> nothing, and the operational recipes apply once it exists again. Commands naming
+> `frugal-rg` will fail until then, which is expected rather than broken.
+
 Everything you do to this deployment after it exists. Read
 [COST-SAFETY.md](COST-SAFETY.md) first if you have not — section 1 there is the
 only thing standing between this project and a bill, and it takes two minutes.
