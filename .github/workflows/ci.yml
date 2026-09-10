@@ -362,6 +362,13 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Named rather than left to auto-discovery. Trivy does pick up a
+          # `.trivyignore` from the scan root on its own, but a suppression that
+          # silently stops applying is the worst failure mode this job has: the
+          # scan would go green for the wrong reason and nobody would look.
+          # Every entry in that file carries the argument for why the finding is
+          # unreachable, and what would invalidate it.
+          trivyignores: .trivyignore
 
       # The filesystem scan above covers the frontend only. It finds
       # package-lock.json and reads it; the backend has no lock file for it to
@@ -385,6 +392,7 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          trivyignores: .trivyignore
 
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
