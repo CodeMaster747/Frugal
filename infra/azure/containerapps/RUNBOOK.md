@@ -21,6 +21,7 @@ the expected bill is **$0**, inside the Consumption free grant.
 | Postgres | Neon, free tier | $0 |
 | Redis | Upstash, free tier | $0 |
 | Frontend | Render, free tier | $0 |
+| Receipt images | Azure Blob, hot LRS, managed identity | ~$0.02/GB, expiring at 90 days |
 | Image | GitHub Container Registry, public | $0 |
 | Logs | Log Analytics, 5 GB free, capped at 1 GB/day | $0 |
 
@@ -30,9 +31,12 @@ is a Container Apps Job on a cron schedule, and it is not built yet. Until it
 is, receipt OCR and the periodic sweeps do not run. Everything synchronous —
 the map, sign-in, transactions, the price graph — does.
 
-**Consequence of that:** `STORAGE_BACKEND` is `memory`. Receipt *images* need
-object storage, and receipt upload is part of the worker path. Standing up a
-storage account for a feature that cannot run would be paying for nothing.
+Receipt *upload* does work, because storing the image is synchronous — it is
+the OCR that is not. `STORAGE_BACKEND` is `azure_blob`, against a storage
+account whose keys are disabled outright, so the app's system-assigned identity
+is the only way in. Nothing in the container's environment is worth stealing:
+there is no connection string and no account key, because a connection string
+could not work even if one leaked.
 
 ---
 
@@ -139,3 +143,5 @@ the VM deployment a ten-minute operation with no data loss.
   price of `min_replicas = 0`, and it is the right trade here.
 - **Migrations are manual.** Step 5 above. A Container Apps Job would automate
   it and is the natural companion to the worker work.
+- **Uploaded receipts are stored but not read.** OCR runs in the worker, so an
+  image lands in Blob and waits. It expires after 90 days either way.

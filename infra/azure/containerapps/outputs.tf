@@ -3,6 +3,11 @@ output "api_url" {
   value       = "https://${azurerm_container_app.api.ingress[0].fqdn}"
 }
 
+output "storage_account" {
+  description = "Receipt images. Reached with the app's managed identity -- there is no key, and none can be created."
+  value       = azurerm_storage_account.receipts.name
+}
+
 output "next_steps" {
   value = <<-EOT
     1. Set BACKEND_ORIGIN on the Render service to the api_url above and

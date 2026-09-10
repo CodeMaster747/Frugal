@@ -80,6 +80,13 @@ resource "azurerm_container_app" "api" {
   revision_mode                = "Single"
   tags                         = local.tags
 
+  # System-assigned rather than user-assigned: this identity has exactly one
+  # consumer and should not outlive it. Its lifecycle is the app's, which is
+  # also what makes `terraform destroy` leave no orphaned principal behind.
+  identity {
+    type = "SystemAssigned"
+  }
+
   # Secrets live in the platform, not in the image and not in this repository.
   secret {
     name  = "database-url"
@@ -148,13 +155,21 @@ resource "azurerm_container_app" "api" {
         value = var.frontend_origin
       }
       env {
-        # In-memory rather than MinIO or Blob. Receipt *images* need object
-        # storage, and receipt upload is part of the worker path that is not
-        # deployed yet; standing up a storage account for a feature that cannot
-        # run would be paying for nothing. Revisit alongside the worker.
         name  = "STORAGE_BACKEND"
-        value = "memory"
+        value = "azure_blob"
       }
+      env {
+        name  = "AZURE_STORAGE_ACCOUNT"
+        value = azurerm_storage_account.receipts.name
+      }
+      env {
+        name  = "AZURE_BLOB_CONTAINER"
+        value = azurerm_storage_container.receipts.name
+      }
+      # Deliberately no AZURE_STORAGE_KEY. The adapter falls back to
+      # `DefaultAzureCredential` when none is set, which resolves to this app's
+      # system-assigned identity -- and the account has keys disabled outright,
+      # so there is no key that could be set even by mistake.
       env {
         name  = "ENVIRONMENT"
         value = "production"

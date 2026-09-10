@@ -8,6 +8,10 @@ terraform {
       # against one provider version rather than drifting apart.
       version = "~> 4.9"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 

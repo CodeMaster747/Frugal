@@ -79,3 +79,16 @@ variable "contribution_pepper" {
   sensitive   = true
   default     = ""
 }
+
+variable "receipt_expiry_days" {
+  description = <<-EOT
+    Days before a receipt image is deleted.
+
+    The extracted data outlives the photograph: merchant, amount, date, line
+    items and the transaction it became all live in Postgres and are unaffected.
+    Ninety days is long enough to re-run OCR after a parser fix and short enough
+    that the blob bill stays rounding error.
+  EOT
+  type        = number
+  default     = 90
+}
