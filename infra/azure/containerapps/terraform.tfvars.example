@@ -12,12 +12,19 @@ image = "ghcr.io/codemaster747/frugal-api:latest"
 
 # --- credentials -------------------------------------------------------------
 
-# Neon, free tier. Note the driver: the app uses asyncpg, and Neon's console
-# hands you a `postgresql://` URL that will not work as-is.
-#   postgresql+asyncpg://USER:PASSWORD@HOST/DBNAME
-# Neon requires TLS; asyncpg negotiates it without a query parameter, so do not
-# copy the `?sslmode=require` the console appends -- asyncpg rejects it.
-database_url = "postgresql+asyncpg://user:password@ep-xxx.region.aws.neon.tech/frugal"
+# Neon, free tier. **Paste what the console gives you, unmodified** -- including
+# `?sslmode=require&channel_binding=require`, and including the bare
+# `postgresql://` scheme.
+#
+# It is tempting to "fix" it to `postgresql+asyncpg://` and strip the query,
+# because asyncpg does reject both `sslmode` and `channel_binding`. Do not:
+# `Settings._to_asyncpg` (app/core/config.py) already adds the driver, rewrites
+# `sslmode` to `ssl`, and drops `channel_binding`. Editing the URL by hand is
+# how you end up with a database named `neondb&channel_binding=require`.
+#
+# Use the **pooled** endpoint -- the hostname with `-pooler` in it. Alembic wants
+# the direct one, which is why `database_direct_url` exists separately.
+database_url = "postgresql://user:password@ep-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
 # Upstash, free tier. `rediss://` with two s -- the TLS scheme. The plain
 # `redis://` endpoint is not offered on the free tier.

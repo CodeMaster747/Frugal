@@ -62,16 +62,19 @@ gh run watch
 # 3. Secrets.
 cd infra/azure/containerapps
 cp terraform.tfvars.example terraform.tfvars
-$EDITOR terraform.tfvars        # see the notes in that file: the driver prefix
-                                # and the rediss:// scheme both matter
+$EDITOR terraform.tfvars        # paste Neon's URL unmodified -- the app
+                                # normalises it. Redis needs rediss://, two s.
 
 # 4. Apply.
 terraform init
 terraform apply
 
-# 5. Migrations. Container Apps runs no one-off command on deploy, so this is
-#    driven from anywhere that can reach Neon:
+# 5. Migrations, if the database is not already at head. Container Apps runs no
+#    one-off command on deploy, so this is driven from anywhere that can reach
+#    Neon. Check first -- re-running against a current database is a no-op, but
+#    knowing which it was is worth ten seconds:
 cd ../../../backend
+DATABASE_URL='<the same value as terraform.tfvars>' alembic current
 DATABASE_URL='<the same value as terraform.tfvars>' alembic upgrade head
 
 # 6. Point the frontend at it.
