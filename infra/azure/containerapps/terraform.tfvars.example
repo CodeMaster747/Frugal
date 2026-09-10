@@ -1,0 +1,32 @@
+# Copy to terraform.tfvars and fill in. That file is gitignored (`*.tfvars` at
+# the repository root, with `*.tfvars.example` re-included) and must stay that
+# way -- three of the four values below are credentials.
+
+subscription_id = "0b200f5d-8662-4d85-90ae-517f274e9054"
+location        = "centralindia"
+frontend_origin = "https://frugal-web.onrender.com"
+
+# Published by .github/workflows/publish-api-image.yml. Lowercase: GHCR rejects
+# an uppercase path.
+image = "ghcr.io/codemaster747/frugal-api:latest"
+
+# --- credentials -------------------------------------------------------------
+
+# Neon, free tier. Note the driver: the app uses asyncpg, and Neon's console
+# hands you a `postgresql://` URL that will not work as-is.
+#   postgresql+asyncpg://USER:PASSWORD@HOST/DBNAME
+# Neon requires TLS; asyncpg negotiates it without a query parameter, so do not
+# copy the `?sslmode=require` the console appends -- asyncpg rejects it.
+database_url = "postgresql+asyncpg://user:password@ep-xxx.region.aws.neon.tech/frugal"
+
+# Upstash, free tier. `rediss://` with two s -- the TLS scheme. The plain
+# `redis://` endpoint is not offered on the free tier.
+redis_url = "rediss://default:PASSWORD@xxx.upstash.io:6379"
+
+# 32+ random bytes. Generate with:  openssl rand -base64 32
+jwt_secret = "replace-me"
+
+# Optional; falls back to jwt_secret. Rotating it silently breaks the
+# one-contribution-per-day constraint, because every stored contributor_hash
+# was computed with the old value. Set once, then leave it alone.
+contribution_pepper = ""

@@ -1,0 +1,80 @@
+# Publish the API image for the Container Apps deployment.
+#
+# GitHub Container Registry rather than ACR, and it is a cost decision: ACR
+# Basic is $5/month against a deployment budgeted for less than three. A public
+# package also means the Container App needs no registry credentials at all --
+# nothing to store, rotate, or leak.
+#
+# Deliberately separate from ci.yml. That workflow builds images to prove they
+# build and pushes nothing; this one publishes, and only from `main`, so a pull
+# request can never move the tag a live deployment pulls.
+name: Publish API image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "infra/docker/backend.Dockerfile"
+      - ".github/workflows/publish-api-image.yml"
+  # Manual runs exist so a deploy can be re-cut without an empty commit.
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository_owner }}/frugal-api
+
+jobs:
+  publish:
+    name: Build and push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The only credential involved. Scoped to this repository and expires
+      # with the job, which is why there is no PAT anywhere in this file.
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Lowercased because GHCR rejects an uppercase path, and GitHub usernames
+      # are frequently mixed case. A silent 403 at push time is the failure this
+      # avoids.
+      - name: Normalise the image name
+        id: name
+        run: echo "value=$(echo '${{ env.REGISTRY }}/${{ env.IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: infra/docker/backend.Dockerfile
+          push: true
+          # `auth` only. The Container Apps deployment runs the API, not the
+          # worker, so the OCR and classifier extras would add hundreds of
+          # megabytes to an image that never calls them. Revisit when the
+          # worker ships.
+          build-args: INSTALL_EXTRAS=auth
+          tags: |
+            ${{ steps.name.outputs.value }}:latest
+            ${{ steps.name.outputs.value }}:${{ github.sha }}
+          # Keeps rebuilds cheap on a runner that starts empty every time.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Where it went
+        run: |
+          echo "Pushed ${{ steps.name.outputs.value }}:latest"
+          echo "and     ${{ steps.name.outputs.value }}:${{ github.sha }}"
+          echo
+          echo "The package defaults to private. Make it public once, under"
+          echo "the repository's Packages tab, or the Container App will need"
+          echo "a pull secret it currently has no reason to hold."
