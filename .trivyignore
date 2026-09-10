@@ -1,0 +1,41 @@
+# Vulnerabilities accepted, with the reason and the condition for revisiting.
+#
+# An entry here is a claim that the finding is not reachable in this codebase --
+# not that it is inconvenient. Each one names what makes it unreachable, so the
+# claim can be checked rather than trusted.
+
+# CVE-2026-85061 -- maplibre-gl, CVSS 10 XSS in DOM.sanitize()
+#
+# The flaw: DOM.sanitize() iterates a live NamedNodeMap while removing
+# attributes, so removing one shifts the rest and an adjacent `onload`/`ontoggle`
+# can survive. It is reached through *attribution strings* -- either an untrusted
+# third-party style's attribution, or a user-supplied custom one -- which the
+# attribution control then writes with innerHTML. Fixed in 6.4.1.
+#
+# Why it is not reachable here:
+#
+#   1. This app renders exactly one attribution string, and it is a literal in
+#      our own source (`buildStyle` in frontend/src/features/map/basemap.ts).
+#      No user, style, or remote document can influence it.
+#   2. The one path by which third-party content could have reached the control
+#      -- the .pmtiles archive's own metadata attribution -- is now explicitly
+#      disabled with `new Protocol({ metadata: false })`. It was already inert,
+#      because pmtiles only reads that flag for TileJSON (`type === "json"`)
+#      requests and the style uses the explicit `tiles: [...]` template form,
+#      but it is now off by intent rather than by accident.
+#   3. There is no custom attribution API exposed to users anywhere in the app.
+#
+# Why not simply upgrade, which is what you should normally do:
+#
+#   MapLibre is pinned to 5.x because pmtiles 4.5 -- still the latest release --
+#   does not work against MapLibre 6. Re-tested on 2026-09-10 against both 6.4.1
+#   (the minimum patched version) and 6.9.0: in each case zero tile range
+#   requests are issued, the vector source stays pending forever, `load` never
+#   fires, and so the pins query never enables either. The map does not degrade,
+#   it dies -- basemap *and* markers. Upgrading to clear this CVE would trade a
+#   non-reachable XSS for a wholly broken map.
+#
+# Revisit when: pmtiles ships MapLibre 6 support (watch its peerDependencies and
+# release notes), or if this app ever renders an attribution string it does not
+# author itself. Either change invalidates the reasoning above.
+CVE-2026-85061

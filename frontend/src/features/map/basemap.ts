@@ -57,10 +57,25 @@ export async function registerProtocol(maplibre: {
 
   const { Protocol } = await import("pmtiles");
 
-  // `metadata: true` costs one extra range request and is what lets the
-  // archive's own attribution string reach the attribution control -- an ODbL
-  // obligation, not a nicety.
-  const protocol = new Protocol({ metadata: true });
+  // `metadata: false`, and the reasoning matters more than the flag.
+  //
+  // This used to be `true`, described as an ODbL obligation. It was not doing
+  // that job: `Protocol.tilev4` only consults `this.metadata` inside its
+  // `if (params.type === "json")` branch, which MapLibre reaches only when a
+  // source names `url: "pmtiles://..."` and asks it to resolve TileJSON. The
+  // style below uses the explicit `tiles: [...]` template form instead, so no
+  // json request is ever issued and the archive's own attribution string has
+  // never reached the attribution control. ODbL is discharged by the literal
+  // `attribution` on the source, which is what actually renders.
+  //
+  // Turned off explicitly because of CVE-2026-85061 -- a CVSS 10 XSS in
+  // MapLibre's `DOM.sanitize()`, reachable through attribution strings, fixed
+  // in 6.4.1 and therefore *not* fixed in the 5.x line this project is pinned
+  // to for the reasons at the top of this file. The pin was re-tested against
+  // both 6.4.1 and 6.9.0 and both still hang, so the mitigation is to make
+  // sure no attribution string this app renders is anything but our own
+  // literal. That was already true by accident; this makes it true on purpose.
+  const protocol = new Protocol({ metadata: false });
 
   // `tilev4`, not `tile`: the latter is a dual-mode shim that still supports
   // MapLibre's old callback style, and v6 expects the Promise form.
