@@ -46,17 +46,31 @@ resource "azurerm_resource_group" "main" {
 }
 
 # Required by the Container Apps environment: it has nowhere else to send
-# stdout. The 5 GB/month free ingestion allowance covers this comfortably, and
-# the daily cap makes that structural rather than hopeful -- an app in a crash
-# loop can otherwise produce a surprising amount of log.
+# stdout.
+#
+# **The daily quota is the budget control, and 1 GB/day was wrong.** Log
+# Analytics gives 5 GB of ingestion free per month and bills $2.30/GB after
+# that in centralindia. A 1 GB/day cap permits ~30 GB in a month, so the worst
+# case was 25 billable GB -- about $57, against a deployment budgeted under
+# three dollars. The cap was protecting against nothing that mattered.
+#
+# 0.15 GB/day is ~4.65 GB/month, which cannot leave the free allowance no
+# matter what the app does. The trade is explicit: a container in a crash loop
+# can exhaust a day's budget and lose the rest of that day's logs -- precisely
+# when logs are most wanted. That is still the right way round, because the
+# alternative is discovering a $57 bill on a $100 credit that has to last a
+# year, and `az containerapp logs show --follow` reads the live stream directly
+# rather than through the workspace.
 resource "azurerm_log_analytics_workspace" "main" {
   name                = "${var.prefix}-logs"
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   sku                 = "PerGB2018"
-  retention_in_days   = 30
-  daily_quota_gb      = 1
-  tags                = local.tags
+  # Retention beyond the included 31 days bills $0.14/GB/month. Thirty keeps it
+  # inside the free window.
+  retention_in_days = 30
+  daily_quota_gb    = 0.15
+  tags              = local.tags
 }
 
 resource "azurerm_container_app_environment" "main" {

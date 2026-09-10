@@ -23,7 +23,7 @@ the expected bill is **$0**, inside the Consumption free grant.
 | Frontend | Render, free tier | $0 |
 | Receipt images | Azure Blob, hot LRS, managed identity | ~$0.02/GB, expiring at 90 days |
 | Image | GitHub Container Registry, public | $0 |
-| Logs | Log Analytics, 5 GB free, capped at 1 GB/day | $0 |
+| Logs | Log Analytics, capped at 0.15 GB/day | $0 — cannot leave the 5 GB free tier |
 
 **Not deployed: the Celery worker and beat.** Celery needs a process that does
 not scale to zero, which is the opposite of the cost model here; the right shape
@@ -118,7 +118,11 @@ The two things that would take this out of the free grant:
 1. **`min_replicas` above 0.** An always-on replica at 0.25 vCPU / 0.5 GiB
    consumes roughly 657,000 vCPU-seconds a month against a 180,000 grant. That
    is the single change most likely to start a bill.
-2. **A `workload_profile` block on the environment.** It moves the environment
+2. **Raising `daily_quota_gb` on the workspace.** Log Analytics bills $2.30/GB
+   past 5 GB/month. At 0.15 GB/day the monthly total cannot reach that; at
+   1 GB/day it could hit ~30 GB, which is about $57 — more than the whole
+   deployment costs in a year.
+3. **A `workload_profile` block on the environment.** It moves the environment
    to the Dedicated plan, which bills an Environment Management Hour at $0.14 —
    about $102/month — before any container runs. The absence of that block in
    `main.tf` is deliberate and load-bearing.
