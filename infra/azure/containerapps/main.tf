@@ -25,11 +25,13 @@
 #     month. Neon and Upstash free tiers hold both, which is what ADR-010
 #     already specified -- the boundary it drew is the reason this migration is
 #     a new compute host and nothing else.
-#   * **No worker or beat, yet.** Celery needs a process that does not scale to
-#     zero, so it belongs in a Container Apps Job on a cron schedule rather than
-#     an always-on replica. Until that exists, receipt OCR and the periodic
-#     sweeps do not run. Everything synchronous -- the map, auth, transactions,
-#     the price graph -- does.
+#   * **No worker or beat.** Celery needs a process that does not scale to
+#     zero. The plan was a Container Apps Job on a cron schedule, but this
+#     environment is Express, and Express does not support jobs -- so that plan
+#     does not apply here. The worker needs a standard environment (which this
+#     subscription refused in Central India) or a different host. Until then,
+#     receipt OCR and the periodic sweeps do not run. Everything synchronous --
+#     the map, auth, transactions, the price graph -- does.
 
 locals {
   tags = {
@@ -80,11 +82,24 @@ resource "azurerm_container_app_environment" "main" {
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
   tags                       = local.tags
 
-  # No `workload_profile` block, and that is load-bearing. Declaring one moves
-  # the environment onto the Dedicated plan, which bills an "Environment
-  # Management Hour" at $0.14 -- about $102/month -- before a single container
-  # runs. Omitting it keeps the environment on Consumption, where the free
-  # grant applies.
+  # No `workload_profile` block, and no environment mode either.
+  #
+  # **An earlier version of this comment was wrong**, and said so with some
+  # confidence: that declaring a workload profile moves the environment onto the
+  # Dedicated plan at about $102/month. Microsoft's billing docs say otherwise:
+  # "You aren't billed any plan management charges unless you use a Dedicated
+  # workload profile in your environment." A Consumption profile carries no
+  # management fee -- Azure attached one to this environment on its own. What
+  # does bill a plan management charge is a *Dedicated* profile, a private
+  # endpoint, or planned maintenance.
+  #
+  # What actually shapes this environment is that **Azure created it in Express
+  # mode** (preview). azurerm 4.81 exposes no argument to choose, and the FAQ
+  # says new environments default to standard -- yet this one is Express, and
+  # Central India refused a standard one outright on this subscription. Express
+  # rejects system-assigned identity (hence the user-assigned one below),
+  # supports manual secrets and HTTP probes, and does not support jobs, workload
+  # profiles, or custom domains. See RUNBOOK.md.
 }
 
 resource "azurerm_container_app" "api" {
@@ -94,11 +109,17 @@ resource "azurerm_container_app" "api" {
   revision_mode                = "Single"
   tags                         = local.tags
 
-  # System-assigned rather than user-assigned: this identity has exactly one
-  # consumer and should not outlive it. Its lifecycle is the app's, which is
-  # also what makes `terraform destroy` leave no orphaned principal behind.
+  # User-assigned, not system-assigned -- and this is not a preference. The
+  # environment is Express, and Express rejects system-assigned identity: the
+  # first deploy used one, Azure created it anyway, and every later update to
+  # the app was refused with ExpressEnvironmentFeatureNotSupported. User-assigned
+  # identity at runtime is supported.
+  #
+  # The cost of the switch is one extra resource with its own lifecycle.
+  # `terraform destroy` removes it with the app, so nothing is orphaned.
   identity {
-    type = "SystemAssigned"
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.api.id]
   }
 
   # Secrets live in the platform, not in the image and not in this repository.
@@ -180,9 +201,19 @@ resource "azurerm_container_app" "api" {
         name  = "AZURE_BLOB_CONTAINER"
         value = azurerm_storage_container.receipts.name
       }
+      env {
+        # Which identity `DefaultAzureCredential` should use. With only a
+        # user-assigned identity attached, the credential cannot find it on its
+        # own -- it looks for a system-assigned one by default -- so without this
+        # it fails to get a token and every blob call is rejected. The adapter
+        # builds `DefaultAzureCredential()` with no arguments, so this variable
+        # is the whole of the wiring: no application change is needed.
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.api.client_id
+      }
       # Deliberately no AZURE_STORAGE_KEY. The adapter falls back to
       # `DefaultAzureCredential` when none is set, which resolves to this app's
-      # system-assigned identity -- and the account has keys disabled outright,
+      # user-assigned identity (named by AZURE_CLIENT_ID above) -- and the account has keys disabled outright,
       # so there is no key that could be set even by mistake.
       env {
         name  = "ENVIRONMENT"
