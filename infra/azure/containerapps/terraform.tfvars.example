@@ -3,7 +3,10 @@
 # way -- three of the four values below are credentials.
 
 subscription_id = "0b200f5d-8662-4d85-90ae-517f274e9054"
-location        = "centralindia"
+# Indonesia Central: Central India refuses Container Apps environments on the
+# student subscription, and the allowed-regions policy excludes Southeast
+# Asia. See the `location` variable for the full reasoning.
+location        = "indonesiacentral"
 frontend_origin = "https://frugal-web.onrender.com"
 
 # Published by .github/workflows/publish-api-image.yml. Lowercase: GHCR rejects

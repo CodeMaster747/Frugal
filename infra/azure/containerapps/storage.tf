@@ -7,7 +7,9 @@
 # It exists because `app/adapters/storage/azure_blob.py` was written for
 # ADR-010 and has had nowhere to run since the VM was destroyed. The adapter
 # authenticates with `DefaultAzureCredential` when no account key is configured,
-# which on Container Apps resolves to the app's system-assigned identity. So the
+# which here resolves to the user-assigned identity below, named to it by
+# AZURE_CLIENT_ID. (System-assigned is what this first used; the environment
+# is Express, which rejects it.) So the
 # interesting property here is what is *absent*: no connection string, no
 # account key, no secret to rotate, and nothing in the container's environment
 # that would be worth stealing.
@@ -77,12 +79,28 @@ resource "azurerm_storage_management_policy" "receipts" {
   }
 }
 
+# --- the identity ------------------------------------------------------------
+
+resource "azurerm_user_assigned_identity" "api" {
+  # User-assigned because this environment is Express, and Express rejects
+  # system-assigned identity. It is still single-purpose: one consumer, reached
+  # by nothing but the two role assignments below.
+  name                = "${var.prefix}-api-identity"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  tags                = local.tags
+}
+
 # --- who may read and write ---------------------------------------------------
 
 resource "azurerm_role_assignment" "app_blob_data" {
   scope                = azurerm_storage_account.receipts.id
   role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_container_app.api.identity[0].principal_id
+  principal_id         = azurerm_user_assigned_identity.api.principal_id
+  # Stated explicitly: a brand-new identity may not have replicated through
+  # Entra yet, and without the type ARM tries to resolve it and can fail with
+  # PrincipalNotFound on the first apply.
+  principal_type = "ServicePrincipal"
 }
 
 resource "azurerm_role_assignment" "app_blob_delegator" {
@@ -93,5 +111,9 @@ resource "azurerm_role_assignment" "app_blob_delegator" {
   # is uploads succeeding and downloads 403ing, which reads as a storage problem
   # and is a permissions one.
   role_definition_name = "Storage Blob Delegator"
-  principal_id         = azurerm_container_app.api.identity[0].principal_id
+  principal_id         = azurerm_user_assigned_identity.api.principal_id
+  # Stated explicitly: a brand-new identity may not have replicated through
+  # Entra yet, and without the type ARM tries to resolve it and can fail with
+  # PrincipalNotFound on the first apply.
+  principal_type = "ServicePrincipal"
 }

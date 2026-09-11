@@ -26,17 +26,44 @@ the expected bill is **$0**, inside the Consumption free grant.
 | Logs | Log Analytics, capped at 0.15 GB/day | $0 — cannot leave the 5 GB free tier |
 
 **Not deployed: the Celery worker and beat.** Celery needs a process that does
-not scale to zero, which is the opposite of the cost model here; the right shape
-is a Container Apps Job on a cron schedule, and it is not built yet. Until it
+not scale to zero, which is the opposite of the cost model here. The intended
+shape was a Container Apps Job on a cron schedule — but this environment is
+Express, and **Express does not support jobs**, so that route is closed here. Until it
 is, receipt OCR and the periodic sweeps do not run. Everything synchronous —
 the map, sign-in, transactions, the price graph — does.
 
 Receipt *upload* does work, because storing the image is synchronous — it is
 the OCR that is not. `STORAGE_BACKEND` is `azure_blob`, against a storage
-account whose keys are disabled outright, so the app's system-assigned identity
+account whose keys are disabled outright, so the app's user-assigned identity
 is the only way in. Nothing in the container's environment is worth stealing:
 there is no connection string and no account key, because a connection string
 could not work even if one leaked.
+
+---
+
+## The environment is Express, and that shapes everything
+
+Azure created this environment with `environmentMode: Express`, a preview tier
+built for fast provisioning and sub-second scale-from-zero. Nothing in Terraform
+asked for it: azurerm 4.81 has no argument for environment mode, and the FAQ says
+new environments default to standard. This subscription refused a standard
+environment in Central India outright, so Express appears to be what it allows.
+
+From the [Express overview](https://learn.microsoft.com/en-us/azure/container-apps/express-overview):
+
+| | On Express |
+|---|---|
+| System-assigned managed identity | **Not supported** — the first deploy used it, and every update was then rejected |
+| User-assigned managed identity at runtime | Supported — what this deployment uses, via `AZURE_CLIENT_ID` |
+| Manual secrets | Supported (not Key Vault references) |
+| HTTP health probes | Supported (not exec probes) |
+| Container Apps jobs | **Not supported** — the worker cannot run as a cron job here |
+| Workload profiles, Dapr | Not supported |
+| Custom domains | Not supported |
+| SLA | None during preview |
+
+**Billing is unchanged by Express:** standard Consumption rates, the same monthly
+free grant, and no environment fee.
 
 ---
 
@@ -125,10 +152,14 @@ The two things that would take this out of the free grant:
    past 5 GB/month. At 0.15 GB/day the monthly total cannot reach that; at
    1 GB/day it could hit ~30 GB, which is about $57 — more than the whole
    deployment costs in a year.
-3. **A `workload_profile` block on the environment.** It moves the environment
-   to the Dedicated plan, which bills an Environment Management Hour at $0.14 —
-   about $102/month — before any container runs. The absence of that block in
-   `main.tf` is deliberate and load-bearing.
+3. **A *Dedicated* workload profile, a private endpoint, or planned
+   maintenance.** Those carry a plan management charge. A Consumption profile
+   does not — the environment already has one, attached by Azure.
+
+   *Correction:* an earlier revision of this runbook said any `workload_profile`
+   block moved the environment to the Dedicated plan at about $102/month. That
+   was wrong. From the billing docs: "You aren't billed any plan management
+   charges unless you use a Dedicated workload profile in your environment."
 
 ## 4. Tearing it down
 
@@ -142,7 +173,7 @@ the VM deployment a ten-minute operation with no data loss.
 
 ## 5. Known gaps
 
-- **No worker or beat.** See above. Receipt OCR and periodic sweeps do not run.
+- **No worker or beat.** See above — and Express rules out running it as a job. Receipt OCR and periodic sweeps do not run.
 - **No custom domain.** The app answers on its generated
   `*.azurecontainerapps.io` name, which has a managed certificate. A custom
   domain is free to add but needs DNS.
