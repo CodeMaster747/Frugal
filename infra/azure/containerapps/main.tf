@@ -52,7 +52,7 @@ resource "azurerm_resource_group" "main" {
 #
 # **The daily quota is the budget control, and 1 GB/day was wrong.** Log
 # Analytics gives 5 GB of ingestion free per month and bills $2.30/GB after
-# that in centralindia. A 1 GB/day cap permits ~30 GB in a month, so the worst
+# that -- the same rate in centralindia and in indonesiacentral, where this runs. A 1 GB/day cap permits ~30 GB in a month, so the worst
 # case was 25 billable GB -- about $57, against a deployment budgeted under
 # three dollars. The cap was protecting against nothing that mattered.
 #
@@ -68,7 +68,8 @@ resource "azurerm_log_analytics_workspace" "main" {
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   sku                 = "PerGB2018"
-  # Retention beyond the included 31 days bills $0.14/GB/month. Thirty keeps it
+  # Retention beyond the included 31 days bills $0.117/GB/month in
+  # indonesiacentral ($0.14 in centralindia). Thirty keeps it
   # inside the free window.
   retention_in_days = 30
   daily_quota_gb    = 0.15

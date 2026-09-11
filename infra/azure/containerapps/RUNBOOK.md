@@ -21,7 +21,7 @@ the expected bill is **$0**, inside the Consumption free grant.
 | Postgres | Neon, free tier | $0 |
 | Redis | Upstash, free tier | $0 |
 | Frontend | Render, free tier | $0 |
-| Receipt images | Azure Blob, hot LRS, managed identity | ~$0.02/GB, expiring at 90 days |
+| Receipt images | Azure Blob, hot LRS, managed identity | ~$0.018/GB in Indonesia Central, expiring at 90 days |
 | Image | GitHub Container Registry, public | $0 |
 | Logs | Log Analytics, capped at 0.15 GB/day | $0 — cannot leave the 5 GB free tier |
 
@@ -120,9 +120,14 @@ az containerapp logs show -g frugal-ca-rg -n frugal-ca-api --follow
 # Recent revisions and their health
 az containerapp revision list -g frugal-ca-rg -n frugal-ca-api -o table
 
-# Roll out a new image without a Terraform run
-az containerapp update -g frugal-ca-rg -n frugal-ca-api \
-  --image ghcr.io/codemaster747/frugal-api:latest
+# Roll out a new image: pin the commit, never :latest.
+# Container Apps does not re-pull a tag that moved, so redeploying :latest
+# silently keeps the old image. The publish workflow tags every build with
+# its commit SHA; set `image` in terraform.tfvars to that tag and apply --
+# the changed value is what forces a new revision.
+SHA=$(gh api repos/CodeMaster747/Frugal/commits/main --jq .sha)
+#   image = "ghcr.io/codemaster747/frugal-api:$SHA"   (in terraform.tfvars)
+terraform plan -out=deploy.tfplan && terraform apply deploy.tfplan && rm deploy.tfplan
 
 # Restart the current revision
 az containerapp revision restart -g frugal-ca-rg -n frugal-ca-api \
@@ -173,7 +178,11 @@ the VM deployment a ten-minute operation with no data loss.
 
 ## 5. Known gaps
 
-- **No worker or beat.** See above — and Express rules out running it as a job. Receipt OCR and periodic sweeps do not run.
+- **No worker or beat.** See above — and Express rules out running it as a job. The API still *queues*
+  work (the `rediss://` TLS fix made that succeed rather than 500), but nothing consumes the queue, so:
+  receipt OCR never runs, forecasts stay at the synchronous tier, offer scraping never fetches,
+  promotions to the price graph never happen, SMS imports stay queued, and the erasure outbox
+  written on account deletion is never swept.
 - **No custom domain.** The app answers on its generated
   `*.azurecontainerapps.io` name, which has a managed certificate. A custom
   domain is free to add but needs DNS.

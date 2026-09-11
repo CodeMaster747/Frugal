@@ -1,7 +1,7 @@
 # Receipt images, on Blob Storage, reached with a managed identity.
 #
 # This is the one part of the deployment that costs real money, and it is
-# roughly $0.02/GB/month on hot LRS -- cents at any volume this project will
+# about $0.018/GB/month on hot LRS in indonesiacentral ($0.02 in centralindia) -- cents at any volume this project will
 # see, and the lifecycle rule below caps even that.
 #
 # It exists because `app/adapters/storage/azure_blob.py` was written for
