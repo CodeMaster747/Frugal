@@ -100,6 +100,18 @@ resource "azurerm_container_app_environment" "main" {
   # rejects system-assigned identity (hence the user-assigned one below),
   # supports manual secrets and HTTP probes, and does not support jobs, workload
   # profiles, or custom domains. See RUNBOOK.md.
+
+  lifecycle {
+    # Azure attached a Consumption workload profile to this environment on its
+    # own, and a plan without this wanted to strip it: an update to an Express
+    # environment, touching a feature Express treats as unsupported. That
+    # request could be rejected part-way through an apply that has already
+    # swapped the role assignments, leaving a half-changed deployment. The
+    # profile carries no fee -- management charges apply only to Dedicated
+    # profiles -- so the right move is to leave Azure's platform-managed value
+    # alone rather than send a change it may refuse.
+    ignore_changes = [workload_profile]
+  }
 }
 
 resource "azurerm_container_app" "api" {
