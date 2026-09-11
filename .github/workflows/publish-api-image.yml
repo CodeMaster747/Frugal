@@ -58,11 +58,19 @@ jobs:
           context: backend
           file: infra/docker/backend.Dockerfile
           push: true
-          # `auth` only. The Container Apps deployment runs the API, not the
-          # worker, so the OCR and classifier extras would add hundreds of
-          # megabytes to an image that never calls them. Revisit when the
-          # worker ships.
-          build-args: INSTALL_EXTRAS=auth
+          # `auth,azure`. `azure` is not optional here, and its absence is what
+          # crashed the first deployment: with STORAGE_BACKEND=azure_blob,
+          # `create_app` builds the object store at startup, and
+          # `app/adapters/storage/azure_blob.py` imports `azure.storage.blob` at
+          # module level -- so an image without the extra dies on import with
+          # `ModuleNotFoundError: No module named 'azure'` and never opens port
+          # 8000. This line said `auth` only, written before Blob storage was
+          # added and never revisited when it was.
+          #
+          # Measured cost of the extra: peak import RSS 119 MiB against 105 MiB
+          # without it, inside a 512 MiB container. OCR and the classifier stay
+          # out -- the worker that uses them does not run in this deployment.
+          build-args: INSTALL_EXTRAS=auth,azure
           tags: |
             ${{ steps.name.outputs.value }}:latest
             ${{ steps.name.outputs.value }}:${{ github.sha }}
