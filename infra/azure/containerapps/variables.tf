@@ -12,15 +12,30 @@ variable "prefix" {
 
 variable "location" {
   description = <<-EOT
-    Region.
+    Region. **Indonesia Central, and the reasons are all measured rather than
+    preferred.**
 
-    `centralindia` matches where the VM deployment ran and where the users are.
-    Container Apps is not available in every region; if an apply fails with a
-    location error, `az provider show -n Microsoft.App --query "resourceTypes[?resourceType=='managedEnvironments'].locations"`
-    lists the ones that work.
+    1. The subscription's "Allowed resource deployment regions" policy permits
+       exactly five: centralindia, austriaeast, uaenorth, eastasia,
+       indonesiacentral. Anything else -- Southeast Asia included -- is denied
+       before the resource provider sees the request.
+    2. Central India, the obvious choice and where the VM ran, refuses Container
+       Apps environments on this subscription with
+       `MaxNumberOfEnvironmentsInSubExceeded` -- even though the usages API
+       (`Microsoft.App/locations/{loc}/usages`) reports 0/1 there, the same as
+       everywhere else. Azure for Students carries a per-region block that API
+       does not expose, so a clean quota number is not evidence an apply will
+       succeed.
+    3. Of the remaining four, Jakarta is closest to both halves of the data
+       path: Neon runs in ap-southeast-1 (Singapore) and Render in Singapore.
+       Central India was always the far side of both.
+
+    If an apply here also returns that 409, try eastasia, then uaenorth, then
+    austriaeast -- in that order of distance to Singapore. A refused
+    environment is never created, so a failed attempt costs nothing.
   EOT
   type        = string
-  default     = "centralindia"
+  default     = "indonesiacentral"
 }
 
 variable "image" {
