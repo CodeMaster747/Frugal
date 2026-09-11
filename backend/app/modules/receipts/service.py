@@ -25,7 +25,7 @@ from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError, UnprocessableError, ValidationError
 from app.core.jobs import Job, JobStatus
 from app.core.logging import get_logger
-from app.core.queue import PROMOTE_RECEIPT, dispatch
+from app.core.queue import PROMOTE_RECEIPT, dispatch_best_effort
 from app.core.repository import BaseRepository
 from app.modules.finance.models import Transaction, TransactionKind, TransactionSource
 from app.modules.finance.schemas import TransactionCreate
@@ -423,7 +423,7 @@ class ReceiptService:
         # recording their own purchase, and they are not waiting on a decision
         # about whether other people get to see the price. A failed promotion
         # must never surface as a failed commit.
-        dispatch(PROMOTE_RECEIPT, receipt_id=str(receipt.id), user_id=str(user_id))
+        dispatch_best_effort(PROMOTE_RECEIPT, receipt_id=str(receipt.id), user_id=str(user_id))
 
         return outcome.transaction
 

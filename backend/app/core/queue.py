@@ -13,14 +13,44 @@ extracted later without dragging the worker's dependencies along.
 
 from __future__ import annotations
 
+import ssl
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from celery import Celery
 from celery.schedules import crontab
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 
 settings = get_settings()
+logger = get_logger(__name__)
+
+
+def _redis_tls_options(url: str) -> dict[str, Any] | None:
+    """TLS options Celery needs for a `rediss://` URL, or None when it needs none.
+
+    Celery refuses a `rediss://` URL that does not say how to verify the server:
+    "A rediss:// URL must have parameter ssl_cert_reqs and this must be set to
+    CERT_REQUIRED, CERT_OPTIONAL, or CERT_NONE". Plain redis-py -- which the
+    readiness check uses -- accepts the same URL without complaint. So a managed
+    Redis that only speaks TLS, which is every free tier worth using (Upstash
+    included), passes `/health/ready` and then fails on the first `send_task`.
+
+    That is what took down every endpoint that queues work on the Container Apps
+    deployment: account deletion, receipt processing and commit, SMS import,
+    forecast refinement, promotion retries. The error came from the result
+    backend, which `send_task` touches, so both halves get the options.
+
+    CERT_REQUIRED, never CERT_NONE: an unverified TLS connection to the queue
+    carries user ids in task payloads to whoever can answer on that address. A
+    URL that states its own `ssl_cert_reqs` is left alone -- kombu reads it.
+    """
+    parts = urlsplit(url)
+    if parts.scheme != "rediss" or "ssl_cert_reqs" in parse_qs(parts.query):
+        return None
+    return {"ssl_cert_reqs": ssl.CERT_REQUIRED}
+
 
 celery_app = Celery(
     "frugal",
@@ -111,6 +141,11 @@ celery_app.conf.update(
 )
 
 
+_tls = _redis_tls_options(str(settings.redis_url))
+if _tls is not None:
+    celery_app.conf.update(broker_use_ssl=_tls, redis_backend_use_ssl=_tls)
+
+
 # Task names, declared here so a dispatcher never imports the task module.
 PROCESS_RECEIPT = "app.workers.tasks.receipts.process_receipt"
 #: Tier-3 forecasting. Runs in the worker because the API image does not
@@ -151,3 +186,24 @@ def dispatch(task_name: str, *, countdown: int = 0, **kwargs: Any) -> str:
     """
     result = celery_app.send_task(task_name, kwargs=kwargs, countdown=countdown)
     return str(result.id)
+
+
+def dispatch_best_effort(task_name: str, *, countdown: int = 0, **kwargs: Any) -> str | None:
+    """Queue a task if the queue will take it; log and carry on if it will not.
+
+    For the call sites whose own contract already says the task is an
+    optimisation rather than an obligation -- account deletion, whose erasure is
+    guaranteed by the hourly sweep over its outbox, and receipt commit, where "a
+    failed promotion must never surface as a failed commit". Before this helper
+    existed, both said so in a comment and then called `dispatch`, so a queue
+    outage rolled back the very transaction the comment promised it could not
+    touch.
+
+    Everything that genuinely needs the task -- anything that stores or returns
+    the id -- keeps calling `dispatch` and keeps failing loudly.
+    """
+    try:
+        return dispatch(task_name, countdown=countdown, **kwargs)
+    except Exception as exc:
+        logger.warning("could not queue %s; relying on its sweep or retry", task_name, exc_info=exc)
+        return None
