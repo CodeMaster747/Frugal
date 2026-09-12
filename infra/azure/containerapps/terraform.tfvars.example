@@ -11,7 +11,10 @@ frontend_origin = "https://frugal-web.onrender.com"
 
 # Published by .github/workflows/publish-api-image.yml. Lowercase: GHCR rejects
 # an uppercase path.
-image = "ghcr.io/codemaster747/frugal-api:latest"
+# Pin a commit SHA, not :latest. Container Apps does not re-pull a moved tag,
+# so :latest redeploys silently keep the old image. The publish workflow tags
+# every build with its SHA.
+image = "ghcr.io/codemaster747/frugal-api:<commit-sha>"
 
 # --- credentials -------------------------------------------------------------
 

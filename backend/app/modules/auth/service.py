@@ -24,7 +24,7 @@ from app.core.errors import (
     UnauthenticatedError,
 )
 from app.core.logging import get_logger
-from app.core.queue import RUN_ERASURE, dispatch
+from app.core.queue import RUN_ERASURE, dispatch_best_effort
 from app.core.rate_limit import (
     login_per_account,
     login_per_ip,
@@ -350,7 +350,7 @@ class AuthService:
 
         await self.users.delete(user)
 
-        dispatch(RUN_ERASURE, countdown=5)
+        dispatch_best_effort(RUN_ERASURE, countdown=5)
 
     # --- oauth -------------------------------------------------------------
 
