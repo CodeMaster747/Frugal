@@ -50,7 +50,7 @@ from app.core.models import Base, TimestampMixin, UUIDMixin
 class ErasureKind(StrEnum):
     """What kind of debt a request records.
 
-    Two rights, deliberately distinguished, because they are not the same and
+    Three rights, deliberately distinguished, because they are not the same and
     the difference matters to the person exercising them:
 
     - ``SIGNALS`` **deletes**. Personalization signals are derived facts about
@@ -59,14 +59,26 @@ class ErasureKind(StrEnum):
       fact about the shop, and deleting it would silently degrade what every
       other user sees, making the shared graph a function of churn. Nulling the
       contributor hash makes the surviving row genuinely anonymous.
+    - ``BLOBS`` **deletes**. A receipt photograph is a fact about one person and
+      nobody else, so there is nothing to weigh against removing it.
+
+      It earns a kind of its own because it is the only obligation here with no
+      row left to drive it: ``receipts`` cascades away with the account, taking
+      the sole copy of ``s3_key``, and nothing else retains the keys. The sweep
+      therefore reconstructs them from ``subject_id``, which is sound because
+      ``s3_key`` is ``receipts/{user_id}/{uuid4}``.
 
     A user who wants their contributions actually removed rather than
     anonymised has a separate, explicit action for it (retraction). Erasure
     anonymises; retraction removes.
+
+    Adding a value needs no migration: ``kind`` is a ``String(32)``, not a
+    Postgres enum type.
     """
 
     SIGNALS = "signals"
     PRICE_CONTRIBUTIONS = "price_contributions"
+    BLOBS = "blobs"
 
 
 class ErasureRequest(UUIDMixin, TimestampMixin, Base):

@@ -348,6 +348,20 @@ class AuthService:
         # anonymises; retraction removes.
         await erasure.request(self.session, user.id, kind=ErasureKind.PRICE_CONTRIBUTIONS)
 
+        # Receipt images, always -- every deployment has an object store.
+        #
+        # This is the one obligation with nothing left to drive it the moment
+        # this transaction commits. `receipts` cascades away with the account
+        # and takes the only copy of `s3_key` with it; the audit entry above
+        # deliberately carries no `changes`; and `erasure_requests` has no
+        # payload column. So the sweep rebuilds the keys from the subject id,
+        # which holds because `s3_key` is `receipts/{user_id}/{uuid4}`.
+        #
+        # Without this line the images outlive the account until the
+        # container's 90-day expiry rule happens to remove them, and no code
+        # path ever would.
+        await erasure.request(self.session, user.id, kind=ErasureKind.BLOBS)
+
         await self.users.delete(user)
 
         dispatch_best_effort(RUN_ERASURE, countdown=5)
