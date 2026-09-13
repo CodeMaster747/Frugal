@@ -100,6 +100,11 @@ WORKDIR /app
 COPY --chown=frugal:frugal alembic.ini ./
 COPY --chown=frugal:frugal alembic ./alembic
 COPY --chown=frugal:frugal app ./app
+# Maintenance entry points, run as `python -m scripts.X`. Without this the
+# scheduled jobs exit `ModuleNotFoundError: No module named 'scripts'` -- the
+# image has carried `alembic/` for the same reason since migrations became a
+# deploy step, and `scripts/run_jobs.py` is now how background work runs at all.
+COPY --chown=frugal:frugal scripts ./scripts
 
 USER frugal
 EXPOSE 8000

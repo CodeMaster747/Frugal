@@ -22,6 +22,7 @@ import pathlib
 
 BACKEND_ROOT = pathlib.Path(__file__).resolve().parents[2]
 TASKS_DIR = BACKEND_ROOT / "app" / "workers" / "tasks"
+RUNNER = BACKEND_ROOT / "scripts" / "run_jobs.py"
 
 
 def _registered_modules() -> set[str]:
@@ -141,3 +142,123 @@ def test_every_scheduled_task_function_exists():
             missing.add(name)
 
     assert not missing, f"task names with no matching function: {sorted(missing)}"
+
+
+def _runner_sweeps() -> set[tuple[str, str]]:
+    """The `(module, function)` pairs `scripts/run_jobs.py` will call.
+
+    Read with `ast` for the same reason as everything else in this file:
+    importing the runner would import every task module it names, and the thing
+    under test is a literal in that file.
+    """
+    tree = ast.parse(RUNNER.read_text())
+
+    pairs: set[tuple[str, str]] = set()
+    for node in ast.walk(tree):
+        targets = (
+            node.targets
+            if isinstance(node, ast.Assign)
+            else [node.target]
+            if isinstance(node, ast.AnnAssign)
+            else []
+        )
+        named = any(isinstance(t, ast.Name) and t.id in {"HOURLY", "NIGHTLY"} for t in targets)
+        if not named or node.value is None:
+            continue
+        for element in getattr(node.value, "elts", []):
+            if (
+                isinstance(element, ast.Tuple)
+                and len(element.elts) == 2
+                and all(isinstance(e, ast.Constant) for e in element.elts)
+            ):
+                pairs.add((element.elts[0].value, element.elts[1].value))
+    return pairs
+
+
+def test_every_runner_sweep_resolves_to_a_real_function():
+    """The runner calls private functions by name, so a typo is silent.
+
+    `getattr(module, "_run")` on a name that does not exist raises inside a cron
+    job nobody is watching. This is the same class of failure the rest of this
+    file exists for, moved to the mechanism that now actually executes the
+    scheduled work.
+    """
+    pairs = _runner_sweeps()
+    assert pairs, "no HOURLY/NIGHTLY sweeps found in scripts/run_jobs.py"
+
+    missing = set()
+    for module_name, function_name in pairs:
+        module_file = TASKS_DIR / f"{module_name}.py"
+        if not module_file.exists():
+            missing.add(f"{module_name}.{function_name} (no such module)")
+            continue
+
+        tree = ast.parse(module_file.read_text())
+        defined = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        if function_name not in defined:
+            missing.add(f"{module_name}.{function_name}")
+
+    assert not missing, f"runner sweeps with no matching function: {sorted(missing)}"
+
+
+def _beat_schedule_task_names() -> set[str]:
+    """Only the names `beat_schedule` actually puts on a clock.
+
+    `_scheduled_task_names` above deliberately sweeps up *every* task-name
+    constant in queue.py, which includes the ones dispatched on demand from an
+    HTTP request -- `process_receipt`, `generate_forecast`, `promote_receipt`.
+    Those have no schedule, so asking whether a periodic runner covers them
+    asserts something that was never true.
+
+    Found by shape rather than by variable name: a dict whose values are dicts
+    carrying a `"task"` key is the beat schedule, and matching on the shape
+    survives the constant being renamed or reflowed.
+    """
+    tree = ast.parse((BACKEND_ROOT / "app" / "core" / "queue.py").read_text())
+
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for entry in node.values:
+            if not isinstance(entry, ast.Dict):
+                continue
+            for key, value in zip(entry.keys, entry.values, strict=False):
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == "task"
+                    and isinstance(value, ast.Constant)
+                    and isinstance(value.value, str)
+                ):
+                    names.add(value.value)
+    return names
+
+
+def test_the_runner_covers_every_scheduled_module():
+    """Nothing that beat used to run may be left with no executor.
+
+    `beat_schedule` is documentation rather than a mechanism now -- no beat
+    process is deployed anywhere -- so a module scheduled there and absent from
+    `scripts/run_jobs.py` is a sweep that has silently stopped happening. That
+    is this repository's recurring failure, moved to the mechanism that now
+    actually runs the work.
+
+    Compared at module level because beat names the *task* while the runner
+    calls the *private* function beneath it, and no static check can map one to
+    the other.
+    """
+    scheduled = _beat_schedule_task_names()
+    assert scheduled, "no beat_schedule entries found in queue.py"
+
+    scheduled_modules = {n.split(".")[3] for n in scheduled if len(n.split(".")) >= 5}
+    runner_modules = {module for module, _ in _runner_sweeps()}
+
+    orphaned = scheduled_modules - runner_modules
+    assert not orphaned, (
+        f"modules with a beat schedule but no runner sweep: {sorted(orphaned)}. "
+        "Nothing executes them: no beat process is deployed."
+    )
