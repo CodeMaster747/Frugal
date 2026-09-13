@@ -71,7 +71,18 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # quay.io rather than Docker Hub, where `minio/minio` is no longer
+    # anonymously pullable. Every CI run died at the first `docker compose run`
+    # with "pull access denied", 11 seconds in and before a single test, while
+    # local development carried on working from a layer cached months ago --
+    # which is why `main` went red without anyone changing anything. quay.io is
+    # MinIO's own registry and serves the same builds.
+    #
+    # Pinned, not `:latest`. A floating tag is what let someone else's
+    # distribution decision break this build with no commit of ours in between,
+    # and the next such change should be a deliberate bump rather than a
+    # morning spent reading CI logs.
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
