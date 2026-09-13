@@ -64,6 +64,7 @@ async def _run_erasure() -> dict[str, Any]:
     # session is what finally makes the claim true.
     async with worker_async_session() as primary:
         anonymised = await _anonymise_contributions(primary)
+        blobs = await _delete_blobs(primary)
 
     if not get_settings().personalization_enabled:
         return {
@@ -71,6 +72,7 @@ async def _run_erasure() -> dict[str, Any]:
             "personalization": "disabled",
             "rows_erased": 0,
             "contributions_anonymised": anonymised,
+            "blobs_deleted": blobs,
             "failed": 0,
         }
 
@@ -107,6 +109,7 @@ async def _run_erasure() -> dict[str, Any]:
         "status": "ok",
         "rows_erased": erased,
         "contributions_anonymised": anonymised,
+        "blobs_deleted": blobs,
         "failed": failed,
     }
 
@@ -134,6 +137,50 @@ async def _anonymise_contributions(primary: AsyncSession) -> int:
             await primary.rollback()
             logger.warning(
                 "contribution anonymisation failed; debt left outstanding",
+                extra={"error": type(exc).__name__},
+            )
+            await erasure.fail(primary, row.id, repr(exc))
+            await primary.commit()
+    return total
+
+
+async def _delete_blobs(primary: AsyncSession) -> int:
+    """Remove a deleted account's receipt images from object storage.
+
+    The obligation with nothing left to drive it: `receipts` cascades away with
+    the account and takes the only copy of `s3_key`, so there is no row to read
+    the keys from and no list of them anywhere. They are rebuilt from the
+    subject id instead, which is sound because `s3_key` is
+    `receipts/{user_id}/{uuid4}` -- the prefix is a complete index of one
+    user's objects, with no bookkeeping that could drift out of step.
+
+    The trailing slash is load-bearing, and `list_prefix` matches literally, so
+    `receipts/{a}/` cannot reach `receipts/{a}b/`. Deleting one account's
+    images is not recoverable by re-running anything.
+
+    Delete before marking paid -- the same ordering as the signals half, for
+    the same reason. A crash between the two leaves the debt outstanding and
+    the sweep runs again, and deleting an absent blob is free; the opposite
+    order marks the obligation paid and leaves the objects.
+    """
+    from app.core import erasure
+    from app.core.erasure import ErasureKind
+    from app.workers.storage import build_object_store
+
+    store = build_object_store(get_settings())
+
+    total = 0
+    for row in await erasure.pending(primary, kind=ErasureKind.BLOBS):
+        try:
+            for key in await store.list_prefix(f"receipts/{row.subject_id}/"):
+                await store.delete(key)
+                total += 1
+            await erasure.complete(primary, row.id)
+            await primary.commit()
+        except Exception as exc:
+            await primary.rollback()
+            logger.warning(
+                "blob erasure failed; debt left outstanding",
                 extra={"error": type(exc).__name__},
             )
             await erasure.fail(primary, row.id, repr(exc))

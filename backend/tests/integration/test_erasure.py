@@ -11,7 +11,8 @@ make it a guarantee rather than a hope are each asserted here:
 - the debt is written in the *same transaction* as the deletion,
 - the sweep deletes the data before it marks the debt paid,
 - a personalization outage does not block a user from deleting their account,
-- running the sweep twice is free.
+- running the sweep twice is free,
+- the account's objects go too, and only that account's.
 """
 
 from __future__ import annotations
@@ -68,8 +69,9 @@ class TestDeletingAnAccount:
         response = await client.delete("/api/v1/auth/me", headers=auth_headers)
         assert response.status_code == 202, response.text
 
-        # Two obligations, one per kind, and they are genuinely different
-        # rights: SIGNALS deletes, PRICE_CONTRIBUTIONS anonymises.
+        # Three obligations, one per kind, and they are genuinely different
+        # rights: SIGNALS deletes, PRICE_CONTRIBUTIONS anonymises, and BLOBS
+        # deletes the objects no cascade can reach.
         kinds = {
             row[0]
             for row in (
@@ -82,8 +84,8 @@ class TestDeletingAnAccount:
                 )
             ).all()
         }
-        assert kinds == {"signals", "price_contributions"}, (
-            f"the deletion did not record both obligations; got {kinds}"
+        assert kinds == {"signals", "price_contributions", "blobs"}, (
+            f"the deletion did not record every obligation; got {kinds}"
         )
 
         from app.workers.tasks.personalization import _run_erasure
@@ -161,7 +163,7 @@ class TestDeletingAnAccount:
                 {"s": subject},
             )
         ).scalar_one()
-        assert pending == 2, "both debts must outlive the outage"
+        assert pending == 3, "all three debts must outlive the outage"
 
     async def test_requesting_twice_records_one_debt(self, db_session):
         from app.core import erasure
@@ -245,6 +247,58 @@ class TestTheSweep:
             )
         ).scalar_one()
         assert outstanding == 0, "the price-contribution debt survived the sweep"
+
+    async def test_it_deletes_the_subjects_blobs_and_nobody_elses(self, monkeypatch, db_session):
+        """The gap the BLOBS kind was added to close.
+
+        `receipts` cascades away with the account, taking the only copy of
+        `s3_key`, so the sweep rebuilds the keys from the subject id. That is
+        the whole design -- and it is only safe if the prefix cannot
+        over-reach, because deleting a second account's photographs is not
+        recoverable by re-running anything: their rows are gone by then too.
+        Hence the bystander below.
+        """
+        from app.adapters.storage.memory import InMemoryObjectStore
+        from app.core import erasure
+        from app.core.erasure import ErasureKind
+        from app.workers import storage as worker_storage
+        from app.workers.tasks import personalization
+
+        subject, bystander = uuid.uuid4(), uuid.uuid4()
+
+        store = InMemoryObjectStore()
+        await store.put_bytes(f"receipts/{subject}/one", b"1", "image/jpeg")
+        await store.put_bytes(f"receipts/{subject}/two", b"2", "image/jpeg")
+        await store.put_bytes(f"receipts/{bystander}/three", b"3", "image/jpeg")
+
+        # The worker composes a *fresh* store on every call, so without this the
+        # sweep would look into an empty one and the test would pass for the
+        # wrong reason. `_delete_blobs` imports the factory at call time, which
+        # is what makes patching the module attribute enough.
+        monkeypatch.setattr(worker_storage, "build_object_store", lambda _settings: store)
+
+        await erasure.request(db_session, subject, kind=ErasureKind.BLOBS)
+        await db_session.commit()
+
+        result = await personalization._run_erasure()
+        assert result["status"] == "ok"
+        assert result["blobs_deleted"] == 2
+
+        assert await store.list_prefix(f"receipts/{subject}/") == []
+        assert await store.list_prefix(f"receipts/{bystander}/") == [
+            f"receipts/{bystander}/three"
+        ], "the sweep reached an account it was never asked about"
+
+        outstanding = (
+            await db_session.execute(
+                text(
+                    "SELECT count(*) FROM erasure_requests "
+                    "WHERE subject_id = :s AND completed_at IS NULL"
+                ),
+                {"s": subject},
+            )
+        ).scalar_one()
+        assert outstanding == 0, "the blob debt survived the sweep"
 
 
 class _WithoutPersonalization:
