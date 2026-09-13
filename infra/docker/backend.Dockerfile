@@ -43,7 +43,18 @@ ENV PYTHONUNBUFFERED=1 \
 # eval harness can run under `make eval`.
 ARG WITH_OCR=false
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `upgrade` before `install`, because the base image lags Debian's security
+# archive and the image scan gates on HIGH/CRITICAL with `ignore-unfixed: true`.
+# That combination means a CVE *with* a published fix fails the build and cannot
+# honestly be suppressed in .trivyignore -- suppression there is a claim the
+# finding is unreachable, which is untrue when the answer is simply a newer
+# package. python:3.11-slim-bookworm shipped libpcre2-8-0 10.42-1 against a
+# patched 10.42-1+deb12u1 (CVE-2026-86145, CVE-2026-89161).
+#
+# Upgrading the whole set rather than naming that one package is deliberate: the
+# next advisory against this base then needs no commit at all.
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         libpq5 curl \
     && if [ "$WITH_OCR" = "true" ]; then \
          apt-get install -y --no-install-recommends \

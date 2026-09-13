@@ -34,7 +34,12 @@ ENV PYTHONUNBUFFERED=1 \
     OMP_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `upgrade` before `install` -- see backend.Dockerfile for the reasoning. Both
+# images sit on the same base and inherit the same lagging OS packages, so a fix
+# applied to only one of them would leave the worker carrying what the API had
+# just cleared.
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         libpq5 \
         libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
         tesseract-ocr tesseract-ocr-eng \
