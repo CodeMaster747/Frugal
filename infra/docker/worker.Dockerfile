@@ -50,6 +50,9 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 COPY --chown=frugal:frugal app ./app
+# See backend.Dockerfile. This image is what the receipts job runs, and it runs
+# it as `python -m scripts.run_jobs receipts`.
+COPY --chown=frugal:frugal scripts ./scripts
 
 USER frugal
 
