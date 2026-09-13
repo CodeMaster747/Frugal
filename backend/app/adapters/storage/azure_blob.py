@@ -217,6 +217,22 @@ class AzureBlobObjectStore:
             with suppress(ResourceNotFoundError):
                 await blob.delete_blob()
 
+    async def list_prefix(self, prefix: str) -> list[str]:
+        """Every blob name under `prefix`.
+
+        `list_blobs` pages internally, so draining the async iterator *is* the
+        pagination -- unlike S3, where the continuation token is the caller's
+        problem. The two adapters therefore look different here while promising
+        the same thing.
+
+        Needs list permission on the container, which `Storage Blob Data
+        Contributor` already carries and the deployment already grants
+        (infra/azure/containerapps/storage.tf). No new role assignment.
+        """
+        async with self._client() as client:
+            container = client.get_container_client(self._container)
+            return [blob.name async for blob in container.list_blobs(name_starts_with=prefix)]
+
     async def exists(self, key: str) -> bool:
         async with self._client() as client:
             blob = client.get_blob_client(self._container, key)

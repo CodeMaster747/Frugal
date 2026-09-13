@@ -118,3 +118,42 @@ async def test_azure_presign_get_without_a_type_omits_the_override() -> None:
     url = await store.presign_get("receipts/abc/def", 300)
 
     assert "rsct" not in parse_qs(urlparse(url).query)
+
+
+@pytest.mark.asyncio
+async def test_list_prefix_returns_only_what_is_under_the_prefix() -> None:
+    """Exercised against the in-memory adapter, which is what it is for.
+
+    The remote two cannot be driven without a network; `test_every_adapter_
+    satisfies_the_port` above is what stops either of them quietly lacking the
+    method, which is the drift this file exists to catch.
+    """
+    store = InMemoryObjectStore()
+    await store.put_bytes("receipts/alice/one", b"1", "image/jpeg")
+    await store.put_bytes("receipts/alice/two", b"2", "image/jpeg")
+    await store.put_bytes("receipts/bob/three", b"3", "image/jpeg")
+
+    assert await store.list_prefix("receipts/alice/") == [
+        "receipts/alice/one",
+        "receipts/alice/two",
+    ]
+    assert await store.list_prefix("receipts/nobody/") == []
+
+
+@pytest.mark.asyncio
+async def test_list_prefix_does_not_match_a_sibling_prefix() -> None:
+    """The guard on an irreversible operation.
+
+    `list_prefix` drives blob erasure, and its argument is built from a user
+    id. If `receipts/{id}/` also matched `receipts/{id}extra/`, deleting one
+    account would delete a different account's receipts -- and because the
+    `receipts` rows cascade away in the same transaction, there would be no
+    record of the keys left to restore from. That is why the contract is a
+    literal prefix with the caller's trailing slash, and why this is a test
+    rather than a comment.
+    """
+    store = InMemoryObjectStore()
+    await store.put_bytes("receipts/abc/one", b"1", "image/jpeg")
+    await store.put_bytes("receipts/abcdef/two", b"2", "image/jpeg")
+
+    assert await store.list_prefix("receipts/abc/") == ["receipts/abc/one"]

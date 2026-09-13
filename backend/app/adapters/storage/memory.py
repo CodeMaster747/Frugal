@@ -48,5 +48,12 @@ class InMemoryObjectStore:
     async def delete(self, key: str) -> None:
         self.objects.pop(key, None)
 
+    async def list_prefix(self, prefix: str) -> list[str]:
+        # Sorted, because dict order here is insertion order -- an accident of
+        # whatever the test happened to store first, not something the port
+        # promises. Sorting lets a test assert on the list rather than a set,
+        # and neither remote adapter guarantees a useful order either.
+        return sorted(key for key in self.objects if key.startswith(prefix))
+
     async def exists(self, key: str) -> bool:
         return key in self.objects
