@@ -56,6 +56,29 @@ class ObjectStore(Protocol):
 
     async def delete(self, key: str) -> None: ...
 
+    async def list_prefix(self, prefix: str) -> list[str]:
+        """Every key under `prefix`.
+
+        The one operation here that is not about a single known key, and it
+        exists for erasure. When an account is deleted its `receipts` rows
+        cascade away, taking with them the only record of which blobs belonged
+        to it -- so the keys have to be derivable from the subject alone. They
+        are: `s3_key` is `receipts/{user_id}/{uuid4}`, which makes
+        `receipts/{user_id}/` a complete, self-describing index with no
+        bookkeeping to drift out of step with the objects.
+
+        A list rather than an async iterator: the result is bounded by one
+        user's receipts, and a caller that is about to delete all of them gains
+        nothing from streaming.
+
+        Matching is a *literal* prefix. Callers pass the trailing slash, so
+        `receipts/{a}/` never matches `receipts/{a}b/` -- which matters because
+        the only caller deletes what this returns. S3's `Prefix`, Azure's
+        `name_starts_with` and a Python `startswith` all mean the same thing,
+        which is what lets one contract hold across three adapters.
+        """
+        ...
+
     async def exists(self, key: str) -> bool: ...
 
 

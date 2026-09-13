@@ -108,6 +108,28 @@ class S3ObjectStore:
         async with self._client() as client:
             await client.delete_object(Bucket=self._bucket, Key=key)
 
+    async def list_prefix(self, prefix: str) -> list[str]:
+        """Every key under `prefix`, following continuation tokens to the end.
+
+        `list_objects_v2` caps a response at 1000 keys and reports the cap only
+        through `IsTruncated`. Taking the first page and stopping would look
+        correct in every test -- no fixture here has a thousand receipts -- and
+        would mean an erasure sweep reporting success having deleted part of
+        someone's data. So the loop is the point, not an optimisation.
+        """
+        keys: list[str] = []
+        token: str | None = None
+        async with self._client() as client:
+            while True:
+                params: dict[str, Any] = {"Bucket": self._bucket, "Prefix": prefix}
+                if token is not None:
+                    params["ContinuationToken"] = token
+                response = await client.list_objects_v2(**params)
+                keys.extend(item["Key"] for item in response.get("Contents", []))
+                if not response.get("IsTruncated"):
+                    return keys
+                token = response.get("NextContinuationToken")
+
     async def exists(self, key: str) -> bool:
         async with self._client() as client:
             try:
