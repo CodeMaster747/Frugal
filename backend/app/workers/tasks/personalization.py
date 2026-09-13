@@ -30,14 +30,21 @@ PROFILE_BATCH = 200
     name="app.workers.tasks.personalization.run_erasure", bind=True
 )
 def run_erasure(self: object) -> dict[str, Any]:
-    """Drain the erasure outbox into the personalization database (FR-1.8)."""
-    if not get_settings().personalization_enabled:
-        return {"status": "disabled"}
+    """Drain the erasure outbox (FR-1.8).
+
+    No `disabled` guard, deliberately. `delete_account` records the
+    price-contribution debt *unconditionally* -- the price graph lives in the
+    primary database, so that obligation exists in every deployment -- and
+    returning early because the **second** database was absent left it with
+    nothing able to pay it. Production runs without `SIGNALS_DATABASE_URL`, so
+    that was every production deletion.
+    """
     return asyncio.run(_run_erasure())
 
 
 async def _run_erasure() -> dict[str, Any]:
     from app.core import erasure
+    from app.core.database import worker_async_session
     from app.core.erasure import ErasureKind
     from app.core.redis import reset_redis
     from app.core.signals_database import worker_both_sessions
@@ -47,14 +54,28 @@ async def _run_erasure() -> dict[str, Any]:
     # engine does. `asyncio.run` gives this task a new loop.
     await reset_redis()
 
-    erased = failed = 0
-    async with worker_both_sessions() as (primary, signals):
-        # The price-graph half lives in the primary database and needs no
-        # second session, so it is drained first and separately. Doing both in
-        # one loop would tie an obligation that *can* be transactional to one
-        # that cannot.
+    # The price-graph half first, in a session of its own.
+    #
+    # It "lives in the primary database and needs no second session" -- which
+    # this comment always claimed, while the code ran it inside
+    # `worker_both_sessions()`, a context that *raises* when there is no second
+    # database. So where personalization was unconfigured it was unreachable
+    # twice over, and the debt accumulated with the gauge switched off. Its own
+    # session is what finally makes the claim true.
+    async with worker_async_session() as primary:
         anonymised = await _anonymise_contributions(primary)
 
+    if not get_settings().personalization_enabled:
+        return {
+            "status": "ok",
+            "personalization": "disabled",
+            "rows_erased": 0,
+            "contributions_anonymised": anonymised,
+            "failed": 0,
+        }
+
+    erased = failed = 0
+    async with worker_both_sessions() as (primary, signals):
         service = PersonalizationService(signals)
         for row in await erasure.pending(primary, kind=ErasureKind.SIGNALS):
             try:

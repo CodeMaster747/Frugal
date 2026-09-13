@@ -208,15 +208,43 @@ class TestTheSweep:
         age = await erasure.oldest_pending_age_seconds(db_session)
         assert age is not None and age >= 0
 
-    async def test_it_reports_disabled_rather_than_failing(self, monkeypatch, settings):
-        """A deployment with no second database must not accumulate errors."""
+    async def test_price_contributions_drain_with_no_second_database(self, monkeypatch, db_session):
+        """The regression this file exists to prevent happening again.
+
+        Production sets no `SIGNALS_DATABASE_URL`, while `delete_account`
+        records a PRICE_CONTRIBUTIONS debt unconditionally. For as long as the
+        sweep returned early on `personalization_enabled`, that debt could never
+        be paid -- and `oldest_pending_erasure_seconds` was gated on the same
+        flag, so the backlog read `None` however large it grew. A deployment
+        without the second database must still pay the half it owes.
+        """
+        from app.core import erasure
         from app.core.config import get_settings
+        from app.core.erasure import ErasureKind
         from app.workers.tasks import personalization
+
+        subject = uuid.uuid4()
+        await erasure.request(db_session, subject, kind=ErasureKind.PRICE_CONTRIBUTIONS)
+        await db_session.commit()
 
         monkeypatch.setattr(
             personalization, "get_settings", lambda: _WithoutPersonalization(get_settings())
         )
-        assert personalization.run_erasure() == {"status": "disabled"}
+        result = await personalization._run_erasure()
+
+        assert result["status"] == "ok"
+        assert result["personalization"] == "disabled"
+
+        outstanding = (
+            await db_session.execute(
+                text(
+                    "SELECT count(*) FROM erasure_requests "
+                    "WHERE subject_id = :s AND completed_at IS NULL"
+                ),
+                {"s": subject},
+            )
+        ).scalar_one()
+        assert outstanding == 0, "the price-contribution debt survived the sweep"
 
 
 class _WithoutPersonalization:
