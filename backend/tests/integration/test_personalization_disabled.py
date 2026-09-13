@@ -88,12 +88,24 @@ class TestWithoutTheSecondDatabase:
         """)
         assert result.returncode == 0, result.stderr
 
-    def test_the_worker_tasks_report_disabled(self):
-        """Not an error, and not a crash loop every hour."""
+    def test_the_sweep_still_pays_the_half_it_owes(self):
+        """Not an error, not a crash loop -- and not a no-op either.
+
+        `run_erasure` used to report `disabled` here, which read as correct and
+        was not: `delete_account` records the price-contribution debt with no
+        personalization check, because the price graph lives in the primary
+        database and exists in every deployment. So the sweep must still run
+        that half and report `ok` with `personalization: "disabled"`. Only
+        `refresh_profiles`, which is purely a signals operation, has genuinely
+        nothing to do.
+        """
         result = _run("""
             from app.workers.tasks.personalization import refresh_profiles, run_erasure
 
-            assert run_erasure() == {"status": "disabled"}
+            result = run_erasure()
+            assert result["status"] == "ok", result
+            assert result["personalization"] == "disabled", result
+
             assert refresh_profiles() == {"status": "disabled"}
             print("OK")
         """)

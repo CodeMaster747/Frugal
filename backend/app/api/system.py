@@ -166,11 +166,14 @@ async def providers(db: Annotated[AsyncSession, Depends(get_db)]) -> ProvidersRe
             )
         )
 
-    oldest_erasure: int | None = None
-    if settings.personalization_enabled:
-        from app.core import erasure
+    # Unconditional, and that is the point. The price-graph half of the outbox
+    # is owed on every deployment -- `delete_account` records it with no
+    # personalization check -- so gating this on the second database reported
+    # `None` however large the queue grew, hiding the backlog in exactly the
+    # place the docstring above calls otherwise invisible.
+    from app.core import erasure
 
-        oldest_erasure = await erasure.oldest_pending_age_seconds(db)
+    oldest_erasure = await erasure.oldest_pending_age_seconds(db)
 
     return ProvidersResponse(
         providers=out,
