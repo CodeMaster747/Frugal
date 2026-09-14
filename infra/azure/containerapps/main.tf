@@ -25,13 +25,16 @@
 #     month. Neon and Upstash free tiers hold both, which is what ADR-010
 #     already specified -- the boundary it drew is the reason this migration is
 #     a new compute host and nothing else.
-#   * **No worker or beat.** Celery needs a process that does not scale to
-#     zero. The plan was a Container Apps Job on a cron schedule, but this
-#     environment is Express, and Express does not support jobs -- so that plan
-#     does not apply here. The worker needs a standard environment (which this
-#     subscription refused in Central India) or a different host. Until then,
-#     receipt OCR and the periodic sweeps do not run. Everything synchronous --
-#     the map, auth, transactions, the price graph -- does.
+#   * **No worker or beat, and none is wanted.** Celery needs a process that
+#     does not scale to zero, and Upstash's free tier cannot feed one: an idle
+#     worker BRPOPs about 2.6M commands a month against a 500k allowance. The
+#     background work runs as one-shot Container Apps Jobs instead -- see
+#     jobs.tf.
+#
+#     Those jobs are **not** in this environment. This one is Express, and
+#     Express refuses job resources outright (probed, not assumed). They live in
+#     a second, standard environment, which costs the API nothing: it keeps this
+#     environment, this FQDN, and required no migration.
 
 locals {
   tags = {

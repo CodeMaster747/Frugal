@@ -182,3 +182,49 @@ ADR introduced all carry over unchanged — only the compute host differs.
 `infra/azure/` remains accurate as instructions for recreating the deployment.
 See [COST-SAFETY.md §7](../../infra/azure/COST-SAFETY.md) for the current status.
 
+---
+
+## Amendment, 2026-09-14 — the worker objection, answered
+
+"Alternatives rejected" above named exactly one concrete blocker against
+Container Apps: **Celery's worker and beat do not scale to zero**, and one
+worker at 0.25 vCPU running continuously is ~648k vCPU-seconds a month against a
+180k grant. The amendment above then adopted Container Apps anyway, without
+saying what became of that objection. This closes it.
+
+**The arithmetic was right.** It is still right — an always-on worker would
+leave the free grant, and nothing here disputes that. A second constraint,
+measured later, makes it worse: Upstash's free tier allows 500k commands a
+month, while an idle worker `BRPOP`s its queues about once a second — roughly
+2.6M. The broker stops answering about a week into every month, and the symptom
+is tasks silently not running. **An always-on Celery worker was never viable on
+this stack**, on either host, for reasons that have nothing to do with Azure.
+
+**What the objection assumed was that a worker is the only shape.** It is not.
+Eleven of the twelve tasks are thin synchronous shims around a plain `async def`
+that the integration suite has always called directly, with no broker. So the
+work runs as **one-shot processes on a cron** — `python -m scripts.run_jobs`,
+as Container Apps Jobs, which bill only while executing. Three scheduled jobs
+come to roughly 21% of the monthly grant, and a process that starts, works and
+exits spends no Redis commands waiting.
+
+**Two wrinkles worth recording**, because both cost time to find:
+
+1. The API's environment is **Express**, which refuses job resources outright
+   (`ExpressEnvironmentResourceNotSupported` — probed, not assumed). The jobs
+   therefore run in a *second, standard* environment. The API was not migrated:
+   jobs need the image, secrets, identity and outbound network, not shared
+   ingress, so it keeps its environment and its FQDN and Render changed nothing.
+2. `properties.environmentMode` is **not expressible in azurerm 4.81** — the
+   provider's environment resource has no argument for it, and a
+   `workload_profile` block is not the equivalent, since the Express environment
+   already carries an identical Consumption profile. That environment is created
+   by one documented CLI command and referenced as a data source. `import` was
+   rejected deliberately: the attribute does not exist on the resource, so a
+   future recreate would quietly produce an Express environment and every job
+   would start failing.
+
+The boundary this ADR argued for held again. The jobs reach Neon, Upstash and
+Blob exactly as the API does, so "where the background work runs" stayed a
+compute decision and touched no data.
+

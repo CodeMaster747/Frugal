@@ -25,12 +25,16 @@ the expected bill is **$0**, inside the Consumption free grant.
 | Image | GitHub Container Registry, public | $0 |
 | Logs | Log Analytics, capped at 0.15 GB/day | $0 — cannot leave the 5 GB free tier |
 
-**Not deployed: the Celery worker and beat.** Celery needs a process that does
-not scale to zero, which is the opposite of the cost model here. The intended
-shape was a Container Apps Job on a cron schedule — but this environment is
-Express, and **Express does not support jobs**, so that route is closed here. Until it
-is, receipt OCR and the periodic sweeps do not run. Everything synchronous —
-the map, sign-in, transactions, the price graph — does.
+**No Celery worker, and none is wanted.** Celery needs a process that does not
+scale to zero, and Upstash's free tier cannot feed one: an idle worker `BRPOP`s
+roughly 2.6M commands a month against a 500k allowance, so the broker stops
+answering about a week into every month and tasks silently stop running.
+
+The background work runs as **one-shot Container Apps Jobs** instead —
+`python -m scripts.run_jobs` — on the cron schedules in [jobs.tf](jobs.tf).
+They live in a *second, standard* environment, because this one is Express and
+Express refuses job resources. The API was not moved to reach them: it keeps
+this environment and this FQDN, and nothing on Render changed.
 
 Receipt *upload* does work, because storing the image is synchronous — it is
 the OCR that is not. `STORAGE_BACKEND` is `azure_blob`, against a storage
@@ -57,7 +61,7 @@ From the [Express overview](https://learn.microsoft.com/en-us/azure/container-ap
 | User-assigned managed identity at runtime | Supported — what this deployment uses, via `AZURE_CLIENT_ID` |
 | Manual secrets | Supported (not Key Vault references) |
 | HTTP health probes | Supported (not exec probes) |
-| Container Apps jobs | **Not supported** — the worker cannot run as a cron job here |
+| Container Apps jobs | **Not supported** — hence the second environment below |
 | Workload profiles, Dapr | Not supported |
 | Custom domains | Not supported |
 | SLA | None during preview |
@@ -92,11 +96,41 @@ cp terraform.tfvars.example terraform.tfvars
 $EDITOR terraform.tfvars        # paste Neon's URL unmodified -- the app
                                 # normalises it. Redis needs rediss://, two s.
 
-# 4. Apply.
+# 4. The jobs environment. ONCE, and not by Terraform.
+#
+#    This environment holds the background jobs. It must NOT be Express --
+#    Express refuses job resources outright -- and `environmentMode` is a
+#    property azurerm 4.81 has no argument for, so the CLI is the only way to
+#    set it. A `workload_profile` block is not the equivalent: the API's
+#    Express environment already carries an identical Consumption profile.
+#
+#    `terraform apply` fails until this exists, by design. The data source in
+#    jobs.tf will not resolve, which is a loud failure at plan time rather than
+#    a quiet one later.
+az containerapp env create \
+  --name frugal-ca-jobs-env \
+  --resource-group frugal-ca-rg \
+  --location eastasia \
+  --environment-mode WorkloadProfiles \
+  --logs-destination none
+
+#    Confirm it is NOT Express before going further. If this prints Express,
+#    stop: every job will be refused.
+az containerapp env show -n frugal-ca-jobs-env -g frugal-ca-rg \
+  --query "properties.environmentMode" -o tsv        # expect: WorkloadProfiles
+
+#    eastasia because that is where a standard environment was proven to
+#    create. indonesiacentral (where the API runs) is worth trying first if you
+#    would rather keep everything in one region -- a refused environment is
+#    never created, so a failed attempt costs nothing. Jobs reach Neon, Upstash
+#    and Blob over the public internet either way, so the region is a latency
+#    choice, not a correctness one.
+
+# 5. Apply.
 terraform init
 terraform apply
 
-# 5. Migrations, if the database is not already at head. Container Apps runs no
+# 6. Migrations, if the database is not already at head. Container Apps runs no
 #    one-off command on deploy, so this is driven from anywhere that can reach
 #    Neon. Check first -- re-running against a current database is a no-op, but
 #    knowing which it was is worth ten seconds:
@@ -104,7 +138,7 @@ cd ../../../backend
 DATABASE_URL='<the same value as terraform.tfvars>' alembic current
 DATABASE_URL='<the same value as terraform.tfvars>' alembic upgrade head
 
-# 6. Point the frontend at it.
+# 7. Point the frontend at it.
 terraform -chdir=../infra/azure/containerapps output -raw api_url
 #    Set that as BACKEND_ORIGIN on the Render service, then redeploy. It is a
 #    server-side rewrite target (frontend/next.config.ts), so the browser never
@@ -134,6 +168,36 @@ az containerapp revision restart -g frugal-ca-rg -n frugal-ca-api \
   --revision "$(az containerapp revision list -g frugal-ca-rg -n frugal-ca-api \
       --query '[0].name' -o tsv)"
 ```
+
+### The background jobs
+
+```bash
+# What is scheduled, and when
+terraform -chdir=infra/azure/containerapps output jobs
+
+# Drain the receipt queue now rather than waiting for the half-hour cron.
+# This is the manual-trigger twin: a job has exactly one trigger type, so the
+# scheduled one cannot also be started by hand.
+az containerapp job start -n frugal-ca-receipts-now -g frugal-ca-rg
+
+# Did executions actually run, and did they succeed?
+az containerapp job execution list -n frugal-ca-sweeps-hourly -g frugal-ca-rg -o table
+
+# What one of them printed. The runner writes a line per sweep and exits
+# non-zero if any failed, so a Failed execution names its own cause.
+az containerapp job logs show -n frugal-ca-receipts-now -g frugal-ca-rg \
+  --container receipts
+
+# Is the erasure backlog draining? This is the number that matters, and it
+# reads None on a deployment where the sweep is not running.
+curl -s https://frugal-web.onrender.com/system/providers \
+  | jq .oldest_pending_erasure_seconds
+```
+
+**Measure before tightening the schedule.** The free-grant arithmetic behind
+`receipts_cron = "*/30"` assumes ~40 seconds per execution *including* pulling a
+944 MB image cold, and that is an estimate rather than a measurement. The
+execution list above reports real durations.
 
 ## 3. What it is actually costing
 
@@ -178,17 +242,21 @@ the VM deployment a ten-minute operation with no data loss.
 
 ## 5. Known gaps
 
-- **No worker or beat.** See above — and Express rules out running it as a job. The API still *queues*
-  work (the `rediss://` TLS fix made that succeed rather than 500), but nothing consumes the queue, so:
-  receipt OCR never runs, forecasts stay at the synchronous tier, offer scraping never fetches,
-  promotions to the price graph never happen, SMS imports stay queued, and the erasure outbox
-  written on account deletion is never swept.
+- **Forecast refinement, SMS imports and price-graph promotions still have no
+  executor.** They are dispatched *on demand* from a request, not on a
+  schedule, so the cron jobs never pick them up — `run_jobs` covers the six
+  periodic sweeps and the receipt queue, which is the scope that was chosen.
+  They queue successfully and wait.
 - **No custom domain.** The app answers on its generated
   `*.azurecontainerapps.io` name, which has a managed certificate. A custom
   domain is free to add but needs DNS.
 - **Cold starts.** First request after idle pays container startup. That is the
   price of `min_replicas = 0`, and it is the right trade here.
-- **Migrations are manual.** Step 5 above. A Container Apps Job would automate
-  it and is the natural companion to the worker work.
-- **Uploaded receipts are stored but not read.** OCR runs in the worker, so an
-  image lands in Blob and waits. It expires after 90 days either way.
+- **Migrations are manual.** Step 6 above. Now that a standard environment
+  exists, a Container Apps Job could run `alembic upgrade head` on deploy — the
+  same pattern as the sweeps, and the natural next use of jobs.tf.
+- **Receipt OCR is batched, not immediate.** An upload waits for the next
+  `frugal-ca-receipts` execution, so up to half an hour on the default
+  schedule. `frugal-ca-receipts-now` cuts that to a single command, and the
+  `/receipts` page polls every two seconds while anything is queued, so the row
+  moves on its own once the job runs.

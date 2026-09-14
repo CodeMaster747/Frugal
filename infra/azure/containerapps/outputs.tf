@@ -8,6 +8,22 @@ output "storage_account" {
   value       = azurerm_storage_account.receipts.name
 }
 
+output "jobs" {
+  description = "The scheduled background jobs, and when each runs."
+  value = merge(
+    {
+      for name, job in local.scheduled_jobs :
+      "${var.prefix}-${name}" => job.cron
+    },
+    { "${var.prefix}-receipts-now" = "manual trigger" },
+  )
+}
+
+output "run_receipts_now" {
+  description = "Drain the receipt queue immediately, rather than waiting for the cron."
+  value       = "az containerapp job start -n ${azurerm_container_app_job.receipts_now.name} -g ${azurerm_resource_group.main.name}"
+}
+
 output "next_steps" {
   value = <<-EOT
     1. Set BACKEND_ORIGIN on the Render service to the api_url above and
@@ -18,5 +34,10 @@ output "next_steps" {
        machine that can reach it -- see RUNBOOK.md.
     3. Expect a cold start on the first request after idle. min_replicas = 0
        is what keeps this inside the free grant.
+    4. Prove a receipt actually processes end to end: upload one, then run the
+       `run_receipts_now` command above and watch the row leave `queued`. It is
+       only proven when `overall_confidence` is non-null -- a green execution
+       with a null confidence means OCR_ENGINE was not `tesseract` and the fake
+       engine "succeeded" having read nothing.
   EOT
 }
