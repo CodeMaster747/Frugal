@@ -1,14 +1,19 @@
-# Publish the API image for the Container Apps deployment.
+# Publish the deployment images to GitHub Container Registry.
 #
-# GitHub Container Registry rather than ACR, and it is a cost decision: ACR
-# Basic is $5/month against a deployment budgeted for less than three. A public
-# package also means the Container App needs no registry credentials at all --
-# nothing to store, rotate, or leak.
+# Two of them, in two independent jobs: the API image the Container App serves
+# from, and the worker image the receipts job runs. Separate jobs rather than
+# extra steps on one, because the two are pinned and deployed independently --
+# a worker build that fails must not stop the API image being published.
+#
+# GHCR rather than ACR, and it is a cost decision: ACR Basic is $5/month against
+# a deployment budgeted for less than three. A public package also means the
+# Container App needs no registry credentials at all -- nothing to store,
+# rotate, or leak.
 #
 # Deliberately separate from ci.yml. That workflow builds images to prove they
 # build and pushes nothing; this one publishes, and only from `main`, so a pull
 # request can never move the tag a live deployment pulls.
-name: Publish API image
+name: Publish images
 
 on:
   push:
@@ -16,6 +21,7 @@ on:
     paths:
       - "backend/**"
       - "infra/docker/backend.Dockerfile"
+      - "infra/docker/worker.Dockerfile"
       - ".github/workflows/publish-api-image.yml"
   # Manual runs exist so a deploy can be re-cut without an empty commit.
   workflow_dispatch:
@@ -23,6 +29,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE: ${{ github.repository_owner }}/frugal-api
+  WORKER_IMAGE: ${{ github.repository_owner }}/frugal-worker
 
 jobs:
   publish:
@@ -86,3 +93,62 @@ jobs:
           echo "The package defaults to private. Make it public once, under"
           echo "the repository's Packages tab, or the Container App will need"
           echo "a pull secret it currently has no reason to hold."
+
+  publish-worker:
+    name: Build and push the worker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same lowercasing as above, and for the same reason: GHCR rejects an
+      # uppercase path and this owner's name is mixed case.
+      - name: Normalise the image name
+        id: name
+        run: echo "value=$(echo '${{ env.REGISTRY }}/${{ env.WORKER_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: infra/docker/worker.Dockerfile
+          push: true
+          # Each of the three is load-bearing for the receipts job:
+          #
+          #   auth   the sweeps construct AuthService, which imports jwt/argon2
+          #   azure  STORAGE_BACKEND=azure_blob, and the adapter imports
+          #          `azure.storage.blob` at module level -- its absence is
+          #          exactly what crash-looped the first API deployment
+          #   ocr    `preprocess()` imports cv2 unconditionally, so this is
+          #          required even when OCR_ENGINE is `fake`
+          #
+          # Not `forecast`: Prophet is ~400 MB and the receipt drain never
+          # reaches it. Not `classify`, for the same reason. The system
+          # libraries (tesseract, OpenCV's) come from worker.Dockerfile itself,
+          # which installs them unconditionally.
+          build-args: INSTALL_EXTRAS=auth,azure,ocr
+          tags: |
+            ${{ steps.name.outputs.value }}:latest
+            ${{ steps.name.outputs.value }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Where it went
+        run: |
+          echo "Pushed ${{ steps.name.outputs.value }}:latest"
+          echo "and     ${{ steps.name.outputs.value }}:${{ github.sha }}"
+          echo
+          echo "First publish only: this package defaults to private. Make it"
+          echo "public under the repository's Packages tab, or the receipts"
+          echo "job's first execution fails to pull with no obvious cause."
