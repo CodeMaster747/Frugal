@@ -57,6 +57,60 @@ variable "frontend_origin" {
   default     = "https://frugal-web.onrender.com"
 }
 
+variable "worker_image" {
+  description = <<-EOT
+    Fully qualified worker image, used by the receipts jobs.
+
+    Separate from `image` because it is a different build: `auth,azure,ocr`
+    plus tesseract and OpenCV's system libraries, against the API image's
+    `auth,azure`. About 944 MB versus a few hundred, which is why the API does
+    not simply use this one -- its cold start is on the request path and the
+    jobs' is not.
+
+    Pin a commit SHA for the same reason as `image`: Container Apps does not
+    re-pull a tag that moved, so `:latest` silently keeps whatever was there.
+  EOT
+  type        = string
+  default     = "ghcr.io/codemaster747/frugal-worker:latest"
+}
+
+variable "jobs_environment_name" {
+  description = <<-EOT
+    Name of the **standard** Container Apps environment that holds the jobs.
+
+    Referenced as a data source, never created here, and that is not a
+    stylistic choice: the property that matters is `properties.environmentMode`,
+    and azurerm 4.81 exposes no argument for it. Only
+    `az containerapp env create --environment-mode WorkloadProfiles` can set it.
+
+    A `workload_profile` block is not the equivalent -- the Express environment
+    already has an identical `workloadProfiles: [Consumption]` array. That is
+    not what makes an environment Express.
+
+    `terraform apply` fails until this environment exists. RUNBOOK.md has the
+    one command that creates it.
+  EOT
+  type        = string
+  default     = "frugal-ca-jobs-env"
+}
+
+variable "receipts_cron" {
+  description = <<-EOT
+    How often the receipt drain runs.
+
+    Every thirty minutes by default, which puts the three scheduled jobs at
+    roughly 21% of the monthly free grant. `*/15` doubles the receipts share
+    for a latency win that the manual `receipts-now` job already provides on
+    demand.
+
+    The estimate behind that 21% assumes ~40s per execution *including* pulling
+    a 944 MB image on a cold start, and it is an estimate. Measure with
+    `az containerapp job execution list` before tightening this.
+  EOT
+  type        = string
+  default     = "*/30 * * * *"
+}
+
 # --- secrets -----------------------------------------------------------------
 #
 # These are the four values that cannot be defaulted, and none of them are ever

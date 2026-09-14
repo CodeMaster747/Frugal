@@ -16,6 +16,17 @@ frontend_origin = "https://frugal-web.onrender.com"
 # every build with its SHA.
 image = "ghcr.io/codemaster747/frugal-api:<commit-sha>"
 
+# The receipts jobs run this one instead: `auth,azure,ocr` plus tesseract and
+# OpenCV's system libraries, ~944 MB. Same publish workflow, same SHA tagging,
+# same reason to pin rather than track :latest.
+worker_image = "ghcr.io/codemaster747/frugal-worker:<commit-sha>"
+
+# The standard environment that holds the jobs. Created once with the az
+# command in RUNBOOK.md, never by Terraform -- azurerm has no argument for
+# `environmentMode`, and this deployment's own environment is Express, which
+# refuses jobs. `terraform apply` fails until it exists.
+jobs_environment_name = "frugal-ca-jobs-env"
+
 # --- credentials -------------------------------------------------------------
 
 # Neon, free tier. **Paste what the console gives you, unmodified** -- including
